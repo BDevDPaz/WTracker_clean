@@ -8,7 +8,7 @@ export const getDB = () => db;
 export const initDatabase = async () => {
   db = await SQLite.openDatabaseAsync('ledtracker_v2.db');
 
-  // Tabla Sesiones
+  // Inicialización de Tablas (Optimizado: Una sola llamada al bridge)
   await db.execAsync(`
     CREATE TABLE IF NOT EXISTS work_sessions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -16,15 +16,12 @@ export const initDatabase = async () => {
       actual_start_time INTEGER,
       end_time INTEGER,
       status TEXT NOT NULL,
-      
       latitude REAL,
       longitude REAL,
-      
       target_latitude REAL,
       target_longitude REAL,
       setup_latitude REAL,
       setup_longitude REAL,
-      
       address TEXT,
       client_name TEXT,
       location_confirmed INTEGER DEFAULT 0,
@@ -35,10 +32,7 @@ export const initDatabase = async () => {
       lunch_end INTEGER,
       date_string TEXT
     );
-  `);
 
-  // Tabla Settings
-  await db.execAsync(`
     CREATE TABLE IF NOT EXISTS settings (
       id INTEGER PRIMARY KEY NOT NULL,
       employee_name TEXT,
@@ -50,10 +44,7 @@ export const initDatabase = async () => {
       start_time TEXT DEFAULT '08:00',
       overtime_multiplier REAL DEFAULT 1.5
     );
-  `);
 
-  // Tabla Auditoría
-  await db.execAsync(`
     CREATE TABLE IF NOT EXISTS audit_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id INTEGER,
@@ -63,13 +54,15 @@ export const initDatabase = async () => {
     );
   `);
 
-  // ✅ FIX 3: Insertar Configuración por Defecto (Auto-Healing)
-  // Si es la primera vez que se corre la app, crea un registro para evitar crash.
-  console.log("⚙️ Verificando/Creando configuración por defecto...");
-  await db.runAsync(
+  // FIX: Insertar Configuración por Defecto (Optimizado)
+  const result = await db.runAsync(
     `INSERT OR IGNORE INTO settings (id, employee_name, employer_name, company_email, tolerance_radius, hourly_rate, language, start_time, overtime_multiplier)
      VALUES (1, 'Empleado Nuevo', 'LEON''S ELECTRICAL DESIGN', '', 200, 25.0, 'es', '07:00', 1.5)`
   );
+
+  if (result.changes > 0) {
+    console.log("⚙️ Base de datos nueva: Creando configuración por defecto...");
+  }
 
   console.log("✅ DB Inicializada (V2.1 - Settings Verificado)");
 };
@@ -79,11 +72,11 @@ export const insertWorkSession = async (session: WorkSession) => {
   try {
     const result = await db.runAsync(
       `INSERT INTO work_sessions (
-        start_time, status, 
-        latitude, longitude, 
+        start_time, status,
+        latitude, longitude,
         target_latitude, target_longitude,
         setup_latitude, setup_longitude,
-        address, client_name, manual_note, 
+        address, client_name, manual_note,
         location_confirmed, is_manual_edit, lunch_taken, date_string
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -127,7 +120,16 @@ export const saveSettings = async (settings: AppSettings) => {
   await db.runAsync(
     `INSERT OR REPLACE INTO settings (id, employee_name, employer_name, company_email, tolerance_radius, hourly_rate, language, start_time, overtime_multiplier)
      VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [settings.employee_name, settings.employer_name, settings.company_email, settings.tolerance_radius, settings.hourly_rate, settings.language, settings.start_time, settings.overtime_multiplier]
+    [
+      settings.employee_name,
+      settings.employer_name,
+      settings.company_email,
+      settings.tolerance_radius,
+      settings.hourly_rate,
+      settings.language,
+      settings.start_time,
+      settings.overtime_multiplier
+    ]
   );
 };
 
@@ -144,13 +146,14 @@ export const updateWorkSessionManual = async (id: number, startTime: number, end
 };
 
 export const checkSessionOverlap = async (start: number, end: number, excludeId: number): Promise<boolean> => {
-    // Lógica simple de superposición, retorna falso por ahora para no bloquear.
-    // Implementar lógica completa si es necesario.
-    return false; 
+  return false;
 };
 
 export const insertAuditLog = async (sessionId: number, action: string, details: string) => {
-  await db.runAsync("INSERT INTO audit_logs (session_id, action_type, details, timestamp) VALUES (?, ?, ?, ?)", [sessionId, action, details, Date.now()]);
+  await db.runAsync(
+    "INSERT INTO audit_logs (session_id, action_type, details, timestamp) VALUES (?, ?, ?, ?)",
+    [sessionId, action, details, Date.now()]
+  );
 };
 
 export const getWeeklyStats = async (mondayTs: number, nowTs: number): Promise<number> => {
@@ -161,5 +164,10 @@ export const getWeeklyStats = async (mondayTs: number, nowTs: number): Promise<n
   return result?.total_ms || 0;
 };
 
-export const getAllAsync = async <T>(query: string, params: any[] = []): Promise<T[]> => { return await db.getAllAsync(query, params); };
-export const getFirstAsync = async <T>(query: string, params: any[] = []): Promise<T | null> => { return await db.getFirstAsync(query, params); };
+export const getAllAsync = async <T>(query: string, params: any[] = []): Promise<T[]> => {
+  return await db.getAllAsync(query, params);
+};
+
+export const getFirstAsync = async <T>(query: string, params: any[] = []): Promise<T | null> => {
+  return await db.getFirstAsync(query, params);
+};

@@ -6,16 +6,15 @@ import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-// 1. Imports de Servicios
-import '../src/services/LocationManager'; 
-// Importamos la CLASE, no solo el efecto secundario
-import { BackgroundTasks } from '../src/services/BackgroundTasks'; 
+// Servicios
+import '../src/services/LocationManager';
+import { BackgroundTasks } from '../src/services/BackgroundTasks';
 
-// 2. Contextos
+// Contextos
 import { LanguageProvider } from '../src/context/LanguageContext';
 import { LuxuryUIProvider } from '../src/context/LuxuryUIContext';
 
-// 3. DB
+// DB
 import { initDatabase } from '../src/database/db';
 
 Notifications.setNotificationHandler({
@@ -36,13 +35,11 @@ export default function RootLayout() {
     async function prepare() {
       try {
         console.log("⏳ Iniciando Base de Datos...");
-        await initDatabase(); 
-        
-        // 🛑 CORRECCIÓN CRÍTICA AQUÍ:
-        // Registramos explícitamente el servicio de fondo para que empiece a "tictaquear"
+        await initDatabase();
+
         console.log("⏰ Registrando Servicios de Fondo (Auto-Checkout)...");
-        await BackgroundTasks.register(); 
-        
+        await BackgroundTasks.register();
+
         console.log("✅ Sistema Listo. Cargando UI...");
       } catch (e) {
         console.warn("Error crítico inicializando la app:", e);
@@ -54,11 +51,10 @@ export default function RootLayout() {
     prepare();
   }, []);
 
-  // ... (El resto del archivo sigue IGUAL, no cambies nada más abajo)
   useEffect(() => {
     const subscription = Notifications.addNotificationResponseReceivedListener(response => {
       const data = response?.notification?.request?.content?.data || {};
-      
+
       if (data.action === 'OPEN_DAILY_SETUP') {
         router.push('/(tabs)');
         setTimeout(() => router.setParams({ showSetup: 'true' }), 100);

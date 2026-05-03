@@ -1,11 +1,18 @@
 import * as TaskManager from 'expo-task-manager';
-import * as BackgroundFetch from 'expo-background-fetch';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getDB, initDatabase, insertAuditLog, updateSessionEndTime } from '../database/db'; // ✅ Importamos initDatabase
+import { getDB, initDatabase, insertAuditLog, updateSessionEndTime } from '../database/db';
 import { WorkSession } from '../types';
 import { generateWeeklyReport } from './ReportGenerator';
 import { LocationService, EXIT_TIMESTAMP_KEY } from './LocationManager';
+
+// Optional import for BackgroundFetch to prevent crashes when native module is missing
+let BackgroundFetch: any = null;
+try {
+  BackgroundFetch = require('expo-background-fetch');
+} catch (e) {
+  console.warn("⚠️ expo-background-fetch native module not found.");
+}
 
 const TASK_NAME = 'APP_BACKGROUND_SERVICES';
 const REPORT_STORAGE_KEY = 'LAST_REPORT_WEEK_ID';
@@ -19,75 +26,69 @@ TaskManager.defineTask(TASK_NAME, async () => {
   let newDataProcessed = false;
 
   try {
-    // 🛑 CRÍTICO: Auto-Inicialización en modo "Headless"
-    // Si la app está cerrada, _layout.tsx NO se ejecutó, así que 'db' es null.
+    // Auto-inicialización en modo headless
     let db = getDB();
     if (!db) {
       console.log("🔌 [Background] DB no inicializada. Iniciando ahora...");
       await initDatabase();
-      db = getDB(); // Recargamos la referencia
+      db = getDB();
     }
 
     if (!db) {
       console.error("❌ [Background] Fallo fatal: No se pudo conectar a la DB.");
-      return BackgroundFetch.BackgroundFetchResult.Failed;
+      return BackgroundFetch ? BackgroundFetch.BackgroundFetchResult.Failed : 3;
     }
 
     const now = Date.now();
 
     // =================================================================
     // 🛡️ BLOQUE 1: FAILSAFE DE AUTO-CHECKOUT
-    // (Envuelto en su propio try/catch para no bloquear el reporte)
     // =================================================================
     try {
       const lastExitStr = await AsyncStorage.getItem(EXIT_TIMESTAMP_KEY);
 
       if (lastExitStr) {
         const exitTime = parseInt(lastExitStr, 10);
-        
-        // Validación de sanidad (si el timestamp es del futuro o muy viejo, borrarlo)
+
         if (isNaN(exitTime) || exitTime > now) {
-           await AsyncStorage.removeItem(EXIT_TIMESTAMP_KEY);
+          await AsyncStorage.removeItem(EXIT_TIMESTAMP_KEY);
         } else {
-           const timeDiff = now - exitTime;
-           
-           if (timeDiff > FAILSAFE_THRESHOLD) {
-             // Verificamos sesión activa
-             const session = await db.getFirstAsync<WorkSession>(
-               "SELECT * FROM work_sessions ORDER BY id DESC LIMIT 1"
-             );
+          const timeDiff = now - exitTime;
 
-             // ✅ Validación extra de sesión
-             if (session && session.id && session.status === 'active') {
-                console.log(`⚠️ [Failsafe] Ejecutando Auto-Checkout para sesión #${session.id}`);
+          if (timeDiff > FAILSAFE_THRESHOLD) {
+            const session = await db.getFirstAsync<WorkSession>(
+              "SELECT * FROM work_sessions ORDER BY id DESC LIMIT 1"
+            );
 
-                await updateSessionEndTime(session.id, exitTime); // Usar hora real de salida
-                
-                await insertAuditLog(
-                  session.id, 
-                  'AUTO_CHECKOUT', 
-                  `Cierre automático por inactividad (>15min).`
-                );
+            if (session && session.id && session.status === 'active') {
+              console.log(`⚠️ [Failsafe] Ejecutando Auto-Checkout para sesión #${session.id}`);
 
-                // Intentamos detener monitoreo (Try/Catch interno por si LocationService falla)
-                // ✅ LocationService.stopMonitoring() ahora también limpia el EXIT_TIMESTAMP_KEY
-                try { await LocationService.stopMonitoring(); } catch (e) { console.warn("Error parando GPS:", e); }
+              await updateSessionEndTime(session.id, exitTime);
 
-                await Notifications.scheduleNotificationAsync({
-                  content: {
-                    title: "Jornada Finalizada 🏁",
-                    body: "Tu sesión se cerró automáticamente por inactividad.",
-                    sound: true,
-                  },
-                  trigger: null,
-                });
+              await insertAuditLog(
+                session.id,
+                'AUTO_CHECKOUT',
+                `Cierre automático por inactividad (>15min).`
+              );
 
-                newDataProcessed = true;
-             } else {
-                // Si ya no es activa, limpiamos la marca
-                await AsyncStorage.removeItem(EXIT_TIMESTAMP_KEY);
-             }
-           }
+              try { await LocationService.stopMonitoring(); } catch (e) {
+                console.warn("Error parando GPS:", e);
+              }
+
+              await Notifications.scheduleNotificationAsync({
+                content: {
+                  title: "Jornada Finalizada 🏁",
+                  body: "Tu sesión se cerró automáticamente por inactividad.",
+                  sound: true,
+                },
+                trigger: null,
+              });
+
+              newDataProcessed = true;
+            } else {
+              await AsyncStorage.removeItem(EXIT_TIMESTAMP_KEY);
+            }
+          }
         }
       }
     } catch (failsafeError) {
@@ -96,12 +97,10 @@ TaskManager.defineTask(TASK_NAME, async () => {
 
     // =================================================================
     // 📄 BLOQUE 2: REPORTE SEMANAL
-    // (Independiente del Failsafe)
     // =================================================================
     try {
       const dateObj = new Date();
-      const day = dateObj.getDay(); 
-      // Ventana: Domingo (Noche) a Martes
+      const day = dateObj.getDay();
       const isReportWindow = (day === 0 && dateObj.getHours() >= 20) || day === 1 || day === 2;
 
       if (isReportWindow) {
@@ -109,8 +108,8 @@ TaskManager.defineTask(TASK_NAME, async () => {
         const diff = dateObj.getDate() - 7 - (day === 0 ? 6 : day - 1);
         lastWeekMonday.setDate(diff);
         lastWeekMonday.setHours(0, 0, 0, 0);
-        const currentWeekId = lastWeekMonday.toISOString().split('T')[0];
 
+        const currentWeekId = lastWeekMonday.toISOString().split('T')[0];
         const lastReported = await AsyncStorage.getItem(REPORT_STORAGE_KEY);
 
         if (lastReported !== currentWeekId) {
@@ -132,7 +131,7 @@ TaskManager.defineTask(TASK_NAME, async () => {
               },
               trigger: null,
             });
-            
+
             await AsyncStorage.setItem(REPORT_STORAGE_KEY, currentWeekId);
             newDataProcessed = true;
           }
@@ -142,13 +141,13 @@ TaskManager.defineTask(TASK_NAME, async () => {
       console.error("⚠️ [Background] Error en Reporte:", reportError);
     }
 
-    return newDataProcessed 
-      ? BackgroundFetch.BackgroundFetchResult.NewData 
-      : BackgroundFetch.BackgroundFetchResult.NoData;
+    return newDataProcessed
+      ? (BackgroundFetch ? BackgroundFetch.BackgroundFetchResult.NewData : 2)
+      : (BackgroundFetch ? BackgroundFetch.BackgroundFetchResult.NoData : 1);
 
   } catch (criticalError) {
     console.error("❌ [Background] Error Crítico General:", criticalError);
-    return BackgroundFetch.BackgroundFetchResult.Failed;
+    return BackgroundFetch ? BackgroundFetch.BackgroundFetchResult.Failed : 3;
   }
 });
 
@@ -158,8 +157,16 @@ TaskManager.defineTask(TASK_NAME, async () => {
 export const BackgroundTasks = {
   register: async () => {
     try {
+      if (!BackgroundFetch) {
+        console.warn("⚠️ Background Fetch no disponible.");
+        return;
+      }
+
       const status = await BackgroundFetch.getStatusAsync();
-      if (status === BackgroundFetch.BackgroundFetchStatus.Restricted || status === BackgroundFetch.BackgroundFetchStatus.Denied) {
+      if (
+        status === BackgroundFetch.BackgroundFetchStatus.Restricted ||
+        status === BackgroundFetch.BackgroundFetchStatus.Denied
+      ) {
         console.warn("⚠️ Background Fetch restringido por el SO.");
         return;
       }
@@ -167,9 +174,9 @@ export const BackgroundTasks = {
       const isRegistered = await TaskManager.isTaskRegisteredAsync(TASK_NAME);
       if (!isRegistered) {
         await BackgroundFetch.registerTaskAsync(TASK_NAME, {
-          minimumInterval: 15 * 60, // 15 minutos
-          stopOnTerminate: false,   // Clave para Android
-          startOnBoot: true,        // Clave para Android
+          minimumInterval: 15 * 60,
+          stopOnTerminate: false,
+          startOnBoot: true,
         });
         console.log("✅ Servicios de fondo (Failsafe + Reportes) registrados.");
       } else {
@@ -179,11 +186,13 @@ export const BackgroundTasks = {
       console.error("⚠️ Error registrando background tasks:", e);
     }
   },
-  
+
   unregister: async () => {
     try {
       const isRegistered = await TaskManager.isTaskRegisteredAsync(TASK_NAME);
-      if (isRegistered) await BackgroundFetch.unregisterTaskAsync(TASK_NAME);
+      if (isRegistered && BackgroundFetch) {
+        await BackgroundFetch.unregisterTaskAsync(TASK_NAME);
+      }
       console.log("🛑 Servicios de fondo detenidos.");
     } catch (e) {
       console.error("Error al desregistrar tarea:", e);
