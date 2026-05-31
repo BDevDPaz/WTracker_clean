@@ -6,6 +6,34 @@ import { LogColor, LogCategory, LogSeverity, SystemLogEntry } from '../types';
 const logQueue: SystemLogEntry[] = [];
 let dbInstance: SQLite.SQLiteDatabase | null = null;
 
+// ✅ [P0-CRITICAL] Formato seguro de metadatos con manejo de Errores
+const formatMetadata = (meta?: any): string | undefined => {
+  if (!meta) return undefined;
+  
+  // Caso 1: Error objects - extraer propiedades manualmente (JSON.stringify no funciona)
+  if (meta instanceof Error) {
+    return JSON.stringify({
+      message: meta.message,
+      name: meta.name,
+      code: (meta as any).code,
+      // Stack truncado a 500 chars para no saturar BD
+      stack: meta.stack ? meta.stack.substring(0, 500) : undefined
+    });
+  }
+  
+  // Caso 2: Objetos normales - truncar si exceden 1KB
+  try {
+    const stringified = JSON.stringify(meta);
+    if (stringified.length > 1000) {
+      return `${stringified.substring(0, 1000)}...[TRUNCATED]`;
+    }
+    return stringified;
+  } catch (e) {
+    // Fallback si JSON.stringify falla (circular references, etc)
+    return `[Circular or Complex Object]`;
+  }
+};
+
 // Vincula la DB al logger y procesa los pendientes
 export const setLoggerDB = (db: SQLite.SQLiteDatabase) => {
   dbInstance = db;
@@ -44,6 +72,9 @@ export const log = (
   const timestamp = now.getTime();
   const timestamp_str = now.toISOString();
 
+  // ✅ Usar formatMetadata en lugar de JSON.stringify directo
+  const formattedMeta = formatMetadata(metadata);
+
   const entry: SystemLogEntry = {
     timestamp,
     timestamp_str,
@@ -51,7 +82,7 @@ export const log = (
     categoria,
     severidad,
     mensaje,
-    metadata: metadata ? JSON.stringify(metadata, Object.getOwnPropertyNames(metadata)) : undefined
+    metadata: formattedMeta
   };
 
   // Asignar el icono correspondiente al color
@@ -73,11 +104,11 @@ export const log = (
   if (severidad === 'ERROR' && metadata instanceof Error) {
     console.error(consoleMsg, metadata);
   } else if (severidad === 'WARN') {
-    console.warn(consoleMsg, metadata || '');
+    console.warn(consoleMsg, formattedMeta ? JSON.parse(formattedMeta) : '');
   } else {
     // Usamos console.log para todo lo demás, preservando tus colores e iconos, 
     // pero sin interrumpir el uso de la aplicación.
-    console.log(consoleMsg, metadata || '');
+    console.log(consoleMsg, formattedMeta ? JSON.parse(formattedMeta) : '');
   }
 
   // Guardar en la DB o mandar a la cola si la DB no está lista
@@ -87,4 +118,3 @@ export const log = (
     logQueue.push(entry);
   }
 };
-
