@@ -97,7 +97,7 @@ export const LuxuryButton = memo(({ onPress, text, icon, variant = 'primary', di
 
   const handlePress = (e: any) => {
     if (!disabled) {
-      log('BLANCO', 'SIN_CAMBIOS', 'DEBUG', `UI: Botón presionado [\${text}]`);
+      log('BLANCO', 'SIN_CAMBIOS', 'DEBUG', `UI: Botón presionado [${text}]`);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       onPress(e);
     }

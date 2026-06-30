@@ -7,9 +7,10 @@ import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 // Servicios
-import '../src/services/LocationManager';
 import { BackgroundTasks } from '../src/services/BackgroundTasks';
 import { log, setLoggerDB } from '../src/utils/logger';
+import { engine } from '../src/engine/workTrackerEngine';
+import { setGeofenceListener } from '../src/services/LocationManager';
 
 // Contextos
 import { LanguageProvider } from '../src/context/LanguageContext';
@@ -66,6 +67,7 @@ export default function RootLayout() {
         log('AZUL', 'ESTADO_SISTEMA', 'INFO', 'Iniciando Base de Datos...');
         const database = await initDatabase();
         setLoggerDB(database);
+        setGeofenceListener(() => engine.dispatch({ type: 'SYNC_ACTIVE_SESSION' }));
 
         log(
           'AZUL',
