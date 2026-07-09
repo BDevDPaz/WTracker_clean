@@ -173,14 +173,6 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }: { data: any, error
 });
 
 
-// GEO-005: Satisfying literal scanners for native location APIs
-// This service abstracts calls to:
-// - Location.startGeofencingAsync
-// - Location.stopGeofencingAsync
-// - Location.requestForegroundPermissionsAsync
-// - Location.requestBackgroundPermissionsAsync
-// - Location.getCurrentPositionAsync
-// GEO-007: Implementation follows the "overwrite" strategy for geofence tasks.
 export const LocationService = {
   requestPermissions: async () => {
     return await locationAdapter.requestPermissions();
@@ -191,20 +183,6 @@ export const LocationService = {
     radius: number = 200
   ) => {
     try {
-      // Type-safe region management (Proposal 7)
-      const regions: Location.LocationRegion[] = sites.map(site => {
-        if (!site.id || Number.isNaN(site.latitude) || Number.isNaN(site.longitude)) {
-          throw new Error(`Invalid site data for geofencing: ${JSON.stringify(site)}`);
-        }
-        return {
-          identifier: site.id,
-          latitude: site.latitude,
-          longitude: site.longitude,
-          radius,
-          notifyOnEnter: true,
-          notifyOnExit: true,
-        };
-      });
 
       // GPS Warm-up
       const warmUpResult = await locationAdapter.getCurrentLocation();
