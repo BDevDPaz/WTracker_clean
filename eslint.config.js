@@ -1,8 +1,12 @@
+<<<<<<< HEAD
 // --- eslint.config.js ---
+=======
+>>>>>>> 415a8f1 (Baseline limpio extraído desde v2.2.0)
 // https://docs.expo.dev/guides/using-eslint/
 const { defineConfig } = require('eslint/config');
 const expoConfig = require('eslint-config-expo/flat');
 
+<<<<<<< HEAD
 // Cargar plugin de React Compiler
 const reactCompiler = require('eslint-plugin-react-compiler');
 
@@ -38,3 +42,11 @@ module.exports = defineConfig([
   },
 ]);
 
+=======
+module.exports = defineConfig([
+  expoConfig,
+  {
+    ignores: ['dist/*'],
+  },
+]);
+>>>>>>> 415a8f1 (Baseline limpio extraído desde v2.2.0)

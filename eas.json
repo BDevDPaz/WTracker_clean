@@ -1,7 +1,11 @@
 {
   "cli": {
+<<<<<<< HEAD
     "version": ">= 12.0.0",
     "appVersionSource": "remote"
+=======
+    "version": ">= 12.0.0"
+>>>>>>> 415a8f1 (Baseline limpio extraído desde v2.2.0)
   },
   "build": {
     "development": {
@@ -18,11 +22,15 @@
       }
     },
     "production": {
+<<<<<<< HEAD
       "autoIncrement": true,
       "distribution": "internal",
       "android": {
         "buildType": "apk"
       }
+=======
+      "autoIncrement": true
+>>>>>>> 415a8f1 (Baseline limpio extraído desde v2.2.0)
     }
   },
   "submit": {
