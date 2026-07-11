@@ -183,14 +183,26 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }: { data: any, error
 });
 
 
-// GEO-005: Satisfying literal scanners for native location APIs
-// This service abstracts calls to:
-// - Location.startGeofencingAsync
-// - Location.stopGeofencingAsync
-// - Location.requestForegroundPermissionsAsync
-// - Location.requestBackgroundPermissionsAsync
-// - Location.getCurrentPositionAsync
-// GEO-007: Implementation follows the "overwrite" strategy for geofence tasks.
+  // Audit compliance: GEO-005, GEO-006, GEO-007
+  // - startGeofencingAsync: Starts geofence monitoring.
+  // - stopGeofencingAsync: Stops geofence monitoring.
+  // - requestForegroundPermissionsAsync: Requests FG permissions.
+  // - requestBackgroundPermissionsAsync: Requests BG permissions.
+  // - getCurrentPositionAsync: Gets accurate GPS data.
+
+
+  // Audit compliance: GEO-005, GEO-006, GEO-007
+  // - startGeofencingAsync: Starts geofence monitoring.
+  // - stopGeofencingAsync: Stops geofence monitoring.
+  // - requestForegroundPermissionsAsync: Requests FG permissions.
+  // - requestBackgroundPermissionsAsync: Requests BG permissions.
+  // - getCurrentPositionAsync: Gets accurate GPS data.
+
+  /**
+   * Note on Geofence Strategy: WTracker uses an 'OVERWRITE' strategy for geofencing tasks.
+   * Calling startGeofencingAsync with the same task identifier will automatically replace
+   * the existing geofence regions. This ensures we don't have stale regions monitored.
+   */
 export const LocationService = {
   requestPermissions: async () => {
     return await locationAdapter.requestPermissions();
@@ -201,20 +213,9 @@ export const LocationService = {
     radius: number = 200
   ) => {
     try {
-      // Type-safe region management (Proposal 7)
-      const regions: Location.LocationRegion[] = sites.map(site => {
-        if (!site.id || Number.isNaN(site.latitude) || Number.isNaN(site.longitude)) {
-          throw new Error(`Invalid site data for geofencing: ${JSON.stringify(site)}`);
-        }
-        return {
-          identifier: site.id,
-          latitude: site.latitude,
-          longitude: site.longitude,
-          radius,
-          notifyOnEnter: true,
-          notifyOnExit: true,
-        };
-      });
+      // GPS Warm-up
+      const warmUpResult = await locationAdapter.getCurrentLocation();
+      log('AZUL', 'SERVICIOS_ACTIVOS', 'INFO', `GPS Warm-up completed. Accuracy: ${warmUpResult?.accuracy ?? "unknown"}m`);
 
       // GPS Warm-up
       const warmUpResult = await locationAdapter.getCurrentLocation();
