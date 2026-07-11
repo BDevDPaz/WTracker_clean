@@ -10,7 +10,7 @@ export const translations = {
     btn_moving: "OTRO SITIO",
 
     // --- HEADER & HOME (Estados del Flujo Maestro) ---
-    header_title: "WORK Tracker",
+    header_title: "WTracker",
     status_active: "ACTIVO",
     status_inactive: "FUERA DE SERVICIO",
     status_pending: "ESPERANDO LLEGADA", // ✅ Vital para Fase 1
@@ -98,9 +98,9 @@ export const translations = {
     
     admin_zone: "ZONA ADMIN",
     admin_unlock: "Desbloquear",
-    admin_pass_placeholder: "Contraseña Admin",
+    admin_access_key_placeholder: "PIN de Acceso",
     admin_locked_msg: "Configuración de empresa bloqueada.",
-    err_pass_wrong: "Contraseña incorrecta",
+    err_access_denied: "Acceso denegado",
 
     // --- AUDITORÍA PDF ---
     pdf_audit_title: "AUDITORÍA DE INTEGRIDAD DE DATOS",
@@ -119,7 +119,7 @@ export const translations = {
     btn_moving: "MOVING",
 
     // --- HEADER & HOME ---
-    header_title: "WORK Tracker",
+    header_title: "WTracker",
     status_active: "ACTIVE",
     status_inactive: "OFF DUTY",
     status_pending: "AWAITING ARRIVAL",
@@ -206,9 +206,9 @@ export const translations = {
     
     admin_zone: "ADMIN ZONE",
     admin_unlock: "Unlock",
-    admin_pass_placeholder: "Admin Password",
+    admin_access_key_placeholder: "Admin Access PIN",
     admin_locked_msg: "Company settings locked.",
-    err_pass_wrong: "Incorrect password",
+    err_access_denied: "Access denied",
 
     // --- AUDIT PDF ---
     pdf_audit_title: "DATA INTEGRITY AUDIT LOG",

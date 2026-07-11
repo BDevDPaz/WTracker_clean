@@ -1,33 +1,37 @@
-// src/utils/dateUtils.ts
+import dayjs from './dayjsSetup';
 
-const TIME_OPTIONS: Intl.DateTimeFormatOptions = {
-  hour: '2-digit',
-  minute: '2-digit',
-  hour12: true
-};
-
-const DATE_OPTIONS: Intl.DateTimeFormatOptions = {
-  weekday: 'short',
-  year: 'numeric',
-  month: 'short',
-  day: 'numeric'
-};
-
-// Helper para mostrar hora
+/**
+ * Formatea un timestamp a hora local corporativa (Ej: 08:30 AM)
+ */
 export const formatTime = (timestamp: number | null | undefined): string => {
   if (!timestamp) return '--:--';
-  return new Date(timestamp).toLocaleTimeString([], TIME_OPTIONS);
+  return dayjs(timestamp).format('hh:mm A');
 };
 
-// Helper para mostrar fecha
+/**
+ * Formatea un timestamp a fecha legible (Ej: dom., 31 may. 2026)
+ */
 export const formatDate = (timestamp: number | null | undefined): string => {
   if (!timestamp) return '---';
-  return new Date(timestamp).toLocaleDateString([], DATE_OPTIONS);
+  return dayjs(timestamp).format('ddd, D MMM YYYY');
 };
 
-// Helper para formatear duración (ms -> HH:mm)
+/**
+ * Convierte milisegundos a una cadena de duración (Ej: 8h 30m)
+ */
 export const formatDuration = (ms: number): string => {
-  const h = Math.floor(ms / 3600000);
-  const m = Math.floor((ms % 3600000) / 60000);
-  return `${h}h ${m}m`;
+  if (ms <= 0) return '0h 0m';
+
+  const totalMinutes = Math.floor(ms / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  return `${hours}h ${minutes}m`;
+};
+
+/**
+ * Calculates if a session crosses midnight.
+ */
+export const crossesMidnight = (startTime: number, endTime: number): boolean => {
+  return dayjs(startTime).date() !== dayjs(endTime).date();
 };

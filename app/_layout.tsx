@@ -1,31 +1,36 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View } from 'react-native';
+import { View, AppState } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
-
-// 1. Imports de Servicios
-import '../src/services/LocationManager'; 
-// Importamos la CLASE, no solo el efecto secundario
-import { BackgroundTasks } from '../src/services/BackgroundTasks'; 
-
-// 2. Contextos
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import '../src/services/LocationManager';
+import { BackgroundTasks, runFailsafeCheck } from '../src/services/BackgroundTasks';
+import { ensureWeeklyReportExists, checkAndDeliverPendingReports } from '../src/services/ReportGenerator';
+import { setupNotifications, scheduleDailyMorningNotification } from '../src/services/Notifications';
+import { log, setLoggerDB } from '../src/utils/logger';
 import { LanguageProvider } from '../src/context/LanguageContext';
 import { LuxuryUIProvider } from '../src/context/LuxuryUIContext';
-
-// 3. DB
+import { useLogFeedback } from '../src/feedback/useLogFeedback';
 import { initDatabase } from '../src/database/db';
+import dayjs from '../src/utils/dayjsSetup';
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
+  handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
 });
 
-SplashScreen.preventAutoHideAsync();
+void SplashScreen.preventAutoHideAsync();
+const LAST_FAILSAFE_CHECK_KEY = 'LAST_FAILSAFE_CHECK_TIMESTAMP';
+
+function handleNotificationAction(router: ReturnType<typeof useRouter>, data: Record<string, unknown>) {
+  if (data.action === 'OPEN_DAILY_SETUP') { router.push('/(tabs)'); setTimeout(() => router.setParams({ showSetup: 'true' }), 100); return; }
+  if (data.action === 'GENERATE_REPORT_PROMPT' || data.action === 'SHOW_REPORT_PROMPT') { router.push('/(tabs)/report'); return; }
+  if (data.action === 'CHECKOUT_DECISION') { router.push('/(tabs)'); setTimeout(() => router.setParams({ showCheckoutPrompt: 'true' }), 100); }
+}
+
+function FeedbackBridge() { useLogFeedback(); return null; }
 
 export default function RootLayout() {
   const router = useRouter();
@@ -34,60 +39,66 @@ export default function RootLayout() {
   useEffect(() => {
     async function prepare() {
       try {
-        console.log("⏳ Iniciando Base de Datos...");
-        await initDatabase(); 
-        
-        // 🛑 CORRECCIÓN CRÍTICA AQUÍ:
-        // Registramos explícitamente el servicio de fondo para que empiece a "tictaquear"
-        console.log("⏰ Registrando Servicios de Fondo (Auto-Checkout)...");
-        await BackgroundTasks.register(); 
-        
-        console.log("✅ Sistema Listo. Cargando UI...");
-      } catch (e) {
-        console.warn("Error crítico inicializando la app:", e);
-      } finally {
-        setAppIsReady(true);
-      }
+        log('AZUL', 'ESTADO_SISTEMA', 'INFO', 'Iniciando Base de Datos...');
+        const database = await initDatabase();
+        setLoggerDB(database);
+        log('AZUL', 'ESTADO_SISTEMA', 'INFO', 'Registrando Servicios de Fondo (Auto-Checkout)...');
+        await BackgroundTasks.register();
+        await setupNotifications();
+        await scheduleDailyMorningNotification();
+        log('AZUL', 'ESTADO_SISTEMA', 'INFO', 'Sistema Listo. Cargando UI...');
+      } catch (e) { log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error crítico inicializando la app', e); }
+      finally { setAppIsReady(true); }
     }
-
-    prepare();
+    void prepare();
   }, []);
 
-  // ... (El resto del archivo sigue IGUAL, no cambies nada más abajo)
   useEffect(() => {
-    const subscription = Notifications.addNotificationResponseReceivedListener(response => {
-      const data = response.notification.request.content.data || {}; 
-      
-      if (data.action === 'OPEN_DAILY_SETUP') {
-        router.push('/(tabs)');
-        setTimeout(() => router.setParams({ showSetup: 'true' }), 100);
-      } else if (data.action === 'GENERATE_REPORT_PROMPT') {
-        router.push('/(tabs)/report');
-      } else if (data.action === 'CHECKOUT_DECISION') {
-        router.push('/(tabs)');
-        setTimeout(() => router.setParams({ showCheckoutPrompt: 'true' }), 100);
+    const handleAppStateChange = async (nextAppState: string) => {
+      if (nextAppState === 'active') {
+        try {
+          const lastCheck = await AsyncStorage.getItem(LAST_FAILSAFE_CHECK_KEY);
+          const now = dayjs().valueOf();
+          const lastCheckTime = lastCheck ? parseInt(lastCheck, 10) : 0;
+          if (now - lastCheckTime > 60 * 60 * 1000) {
+            log('AZUL', 'ESTADO_SISTEMA', 'DEBUG', 'Ejecutando verificaciones de respaldo (Failsafe + Reportes + Envíos)...');
+            await Promise.all([runFailsafeCheck(), ensureWeeklyReportExists(), checkAndDeliverPendingReports(), scheduleDailyMorningNotification()]);
+            await AsyncStorage.setItem(LAST_FAILSAFE_CHECK_KEY, now.toString());
+          }
+        } catch (e) { log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Fallo en verificaciones de respaldo', e); }
       }
-    });
-
+    };
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription.remove();
   }, []);
 
-  const onLayoutRootView = useCallback(async () => {
-    if (appIsReady) await SplashScreen.hideAsync();
-  }, [appIsReady]);
+  useEffect(() => {
+    const lastResponse = Notifications.getLastNotificationResponse();
+    if (lastResponse?.notification?.request?.content?.data) { handleNotificationAction(router, lastResponse.notification.request.content.data as Record<string, unknown>); }
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+        const data = (response?.notification?.request?.content?.data as Record<string, unknown>) || {};
+        handleNotificationAction(router, data);
+      }
+    );
+    return () => subscription.remove();
+  }, [router]);
 
+  const onLayoutRootView = useCallback(async () => { if (appIsReady) { await SplashScreen.hideAsync(); } }, [appIsReady]);
   if (!appIsReady) return null;
 
   return (
-    <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
-      <LanguageProvider>
-        <LuxuryUIProvider>
-          <StatusBar style="light" />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(tabs)" />
-          </Stack>
-        </LuxuryUIProvider>
-      </LanguageProvider>
-    </View>
+    <SafeAreaProvider>
+      <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
+        <LanguageProvider>
+          <LuxuryUIProvider>
+            <FeedbackBridge />
+            <StatusBar style="light" />
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="(tabs)" />
+            </Stack>
+          </LuxuryUIProvider>
+        </LanguageProvider>
+      </View>
+    </SafeAreaProvider>
   );
 }

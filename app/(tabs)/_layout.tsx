@@ -1,11 +1,7 @@
-import React from 'react';
-import { View, StyleSheet, Platform } from 'react-native';
-import { Tabs } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
-
-// ✅ Ruta ajustada (dos niveles atrás)
-import { COLORS } from '../../src/constants/theme';
+import React from "react";
+import { Tabs } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import { COLORS } from "../../src/constants/theme";
 
 export default function TabsLayout() {
   return (
@@ -13,93 +9,70 @@ export default function TabsLayout() {
       initialRouteName="index"
       screenOptions={{
         headerShown: false,
-        tabBarShowLabel: false,
-        tabBarStyle: styles.tabBar,
-        tabBarBackground: () => (
-          <BlurView intensity={80} tint="dark" style={styles.blurContainer} />
-        ),
+        tabBarActiveTintColor: COLORS.gold,
+        tabBarInactiveTintColor: COLORS.textSecondary,
+        tabBarStyle: {
+          backgroundColor: COLORS.surface,
+          borderTopWidth: 0,
+          paddingTop: 6,
+          paddingBottom: 10,
+          height: 70,
+        },
+        tabBarLabelStyle: {
+          fontFamily: "Montserrat_600SemiBold",
+          fontSize: 10,
+        },
       }}
     >
-      {/* 1. HOME */}
       <Tabs.Screen
         name="index"
         options={{
-          tabBarIcon: ({ focused }) => (
-            <View style={styles.iconWrapper}>
-              <Ionicons name="timer" size={24} color={focused ? COLORS.gold : '#666'} />
-              {focused && <View style={styles.activeDot} />}
-            </View>
-          ),
-        }}
-      />
-      
-      {/* 2. REPORTE */}
-      <Tabs.Screen
-        name="report"
-        options={{
-          tabBarIcon: ({ focused }) => (
-            <View style={styles.iconWrapper}>
-              <Ionicons name="document-text" size={24} color={focused ? COLORS.gold : '#666'} />
-              {focused && <View style={styles.activeDot} />}
-            </View>
+          title: "Inicio",
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="home" size={20} color={color} />
           ),
         }}
       />
 
-      {/* 3. HISTORIAL */}
       <Tabs.Screen
-        name="history"
+        name="report"
         options={{
-          tabBarIcon: ({ focused }) => (
-            <View style={styles.iconWrapper}>
-              <Ionicons name="calendar" size={24} color={focused ? COLORS.gold : '#666'} />
-              {focused && <View style={styles.activeDot} />}
-            </View>
+          title: "Reporte",
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="document-text" size={20} color={color} />
           ),
         }}
       />
-      
-      {/* 4. SETTINGS */}
+
+      <Tabs.Screen
+        name="history"
+        options={{
+          title: "Historial",
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="time" size={20} color={color} />
+          ),
+        }}
+      />
+
       <Tabs.Screen
         name="settings"
         options={{
-          tabBarIcon: ({ focused }) => (
-            <View style={styles.iconWrapper}>
-              <Ionicons name="settings" size={24} color={focused ? COLORS.gold : '#666'} />
-              {focused && <View style={styles.activeDot} />}
-            </View>
+          title: "Ajustes",
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="settings" size={20} color={color} />
+          ),
+        }}
+      />
+
+      <Tabs.Screen
+        name="legal"
+        options={{
+          title: "Legal",
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="shield-checkmark" size={20} color={color} />
           ),
         }}
       />
     </Tabs>
   );
 }
-
-const styles = StyleSheet.create({
-  tabBar: {
-    position: 'absolute',
-    bottom: 30,
-    left: '10%', right: '10%',
-    height: 64,
-    backgroundColor: 'transparent',
-    borderTopWidth: 0,
-    elevation: 0,
-  },
-  blurContainer: {
-    flex: 1,
-    borderRadius: 32,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(15,15,15,0.95)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  iconWrapper: {
-    alignItems: 'center', justifyContent: 'center',
-    top: Platform.OS === 'ios' ? 15 : 0,
-  },
-  activeDot: {
-    width: 4, height: 4, borderRadius: 2,
-    backgroundColor: COLORS.gold, marginTop: 4,
-    shadowColor: COLORS.gold, shadowOpacity: 1, shadowRadius: 5,
-  }
-});
