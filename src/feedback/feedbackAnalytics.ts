@@ -1,6 +1,11 @@
+const feedbackAnalyticsTrace = (...args: unknown[]) => {
+  if (typeof __DEV__ !== 'undefined' && __DEV__) {
+    console.debug('[feedbackAnalytics]', ...args);
+  }
+};
+
 // src/feedback/feedbackAnalytics.ts
 import { LogCategory, LogSeverity } from '../types';
-import { log } from '../utils/logger';
 
 export interface FeedbackEvent {
   timestamp: number;
@@ -25,7 +30,7 @@ export const recordFeedbackEvent = (event: FeedbackEvent) => {
 
   if (feedbackEvents.length % 50 === 0) {
     const stats = getFeedbackStats();
-    log('AZUL', 'ESTADO_SISTEMA', 'DEBUG', `Feedback stats: ${JSON.stringify(stats)}`);
+    feedbackAnalyticsTrace('AZUL', 'ESTADO_SISTEMA', 'DEBUG', `Feedback stats: ${JSON.stringify(stats)}`);
   }
 };
 
