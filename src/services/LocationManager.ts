@@ -191,7 +191,7 @@ export const LocationService = {
   },
 
   startMonitoringArrival: async (
-    sites: Array<{ id: string; latitude: number; longitude: number }>,
+    sites: { id: string; latitude: number; longitude: number }[],
     radius: number = 200
   ) => {
     try {
