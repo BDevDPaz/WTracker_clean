@@ -9,7 +9,9 @@ RUN_CHECKS="${RUN_CHECKS:-0}"
 AUTO_PUSH="${AUTO_PUSH:-0}"
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
-LOG_FILE="merge-report-${TIMESTAMP}.log"
+LOG_DIR=".git/merge-logs"
+mkdir -p "$LOG_DIR"
+LOG_FILE="${LOG_DIR}/merge-report-${TIMESTAMP}.log"
 BACKUP_TAG="backup/pre-merge-wtracker-${TIMESTAMP}"
 BACKUP_BRANCH="backup/main-pre-merge-${TIMESTAMP}"
 
