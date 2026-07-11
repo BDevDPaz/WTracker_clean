@@ -3,27 +3,6 @@
 set -u
 set -o pipefail
 
-# ============================================================
-# WTracker / LEDTracker - Integracion automatica de ramas
-#
-# Ejecutar desde la raiz del repo:
-#   ~/.../cleans/WTracker_clean
-#
-# Uso:
-#   chmod +x merge_wtracker_branches.sh
-#   ./merge_wtracker_branches.sh
-#
-# Opciones:
-#   RUN_CHECKS=1 ./merge_wtracker_branches.sh
-#   AUTO_PUSH=1 ./merge_wtracker_branches.sh
-#   BASE_BRANCH=main ./merge_wtracker_branches.sh
-#
-# Politica de conflictos:
-#   - Intenta merge con -X theirs.
-#   - Si quedan conflictos, usa automaticamente la version de la rama entrante.
-#   - Si hay conflicto en package.json o package-lock.json, ejecuta npm install.
-# ============================================================
-
 BASE_BRANCH="${BASE_BRANCH:-main}"
 INTEGRATION_BRANCH="${INTEGRATION_BRANCH:-integration/wtracker-v2.2-merge}"
 RUN_CHECKS="${RUN_CHECKS:-0}"
@@ -68,6 +47,10 @@ has_unmerged_files() {
   [ -n "$(git diff --name-only --diff-filter=U)" ]
 }
 
+has_any_changes() {
+  ! git diff --quiet || ! git diff --cached --quiet
+}
+
 branch_exists() {
   local branch="$1"
   git show-ref --verify --quiet "refs/heads/${branch}" || git show-ref --verify --quiet "refs/remotes/origin/${branch}"
@@ -85,19 +68,49 @@ checkout_branch() {
   fi
 }
 
+detect_current_merge_branch() {
+  if [ -f ".git/MERGE_MSG" ]; then
+    awk -F"'" '/^Merge branch / {print $2; exit}' .git/MERGE_MSG
+  fi
+}
+
+auto_commit_residual_changes() {
+  local message="${1:-Automated residual changes after merge}"
+
+  if is_merge_in_progress; then
+    return 0
+  fi
+
+  if has_any_changes; then
+    section "Cambios residuales detectados"
+
+    log "Se encontraron cambios fuera de un merge. Se agregaran y confirmaran automaticamente."
+    git status --short | tee -a "$LOG_FILE"
+
+    git add . >>"$LOG_FILE" 2>&1 || die "No se pudo hacer git add de cambios residuales."
+
+    if git diff --cached --quiet; then
+      log "${YELLOW}No hay cambios staged despues de git add. Continuando.${NC}"
+      return 0
+    fi
+
+    git commit -m "$message" >>"$LOG_FILE" 2>&1 || die "No se pudo crear commit de cambios residuales."
+
+    log "${GREEN}OK:${NC} cambios residuales confirmados automaticamente."
+  fi
+}
+
 check_clean_worktree() {
   if is_merge_in_progress; then
     return 0
   fi
 
-  if ! git diff --quiet || ! git diff --cached --quiet; then
-    die "Tu arbol de trabajo no esta limpio. Hay cambios fuera de un merge. Haz commit, stash o limpia antes de continuar."
+  if has_any_changes; then
+    auto_commit_residual_changes "Automated cleanup of residual merge changes"
   fi
-}
 
-detect_current_merge_branch() {
-  if [ -f ".git/MERGE_MSG" ]; then
-    sed -n "s/^Merge branch '$$[^']*$$'.*/\1/p" .git/MERGE_MSG | head -n 1
+  if has_any_changes; then
+    die "El arbol de trabajo sigue sin estar limpio despues del auto-commit."
   fi
 }
 
@@ -145,14 +158,14 @@ auto_resolve_unmerged_files() {
         ;;
 
       package-lock.json)
-        log "${YELLOW}Conflicto en package-lock.json:${NC} se regenerara con npm install."
+        log "${YELLOW}Conflicto en package-lock.json:${NC} usando version entrante y luego regenerando."
         git checkout --theirs -- "$file" >>"$LOG_FILE" 2>&1 || true
         git add "$file" >>"$LOG_FILE" 2>&1 || true
         need_npm_install="1"
         ;;
 
       src/services/ReportGenerator.ts)
-        log "${YELLOW}Conflicto en ReportGenerator.ts:${NC} usando version de la rama entrante para preservar fixes de seguridad/reportes."
+        log "${YELLOW}Conflicto en ReportGenerator.ts:${NC} usando version entrante para priorizar fixes de seguridad/reportes."
         git checkout --theirs -- "$file" >>"$LOG_FILE" 2>&1 || die "No se pudo aplicar --theirs en $file."
         git add "$file" >>"$LOG_FILE" 2>&1 || die "No se pudo agregar $file."
         ;;
@@ -195,15 +208,13 @@ complete_merge_if_in_progress() {
 
   git add . >>"$LOG_FILE" 2>&1 || die "No se pudo hacer git add final."
 
-  if git diff --cached --quiet; then
-    log "${YELLOW}No hay cambios staged. Intentando completar merge con --continue.${NC}"
-  fi
-
   git commit --no-edit >>"$LOG_FILE" 2>&1 || \
     git commit -m "Merge branch '${branch_name}' into ${INTEGRATION_BRANCH}" >>"$LOG_FILE" 2>&1 || \
     die "No se pudo completar el commit del merge pendiente."
 
   log "${GREEN}OK:${NC} merge pendiente completado automaticamente."
+
+  auto_commit_residual_changes "Automated dependency normalization after merge '${branch_name}'"
 }
 
 ensure_base_updated() {
@@ -227,17 +238,8 @@ ensure_base_updated() {
 create_backup() {
   section "Creando respaldo de seguridad"
 
-  if git show-ref --verify --quiet "refs/tags/${BACKUP_TAG}"; then
-    log "${YELLOW}El tag ${BACKUP_TAG} ya existe. Omitiendo.${NC}"
-  else
-    git tag "$BACKUP_TAG" >>"$LOG_FILE" 2>&1 || die "No se pudo crear el tag de respaldo."
-  fi
-
-  if git show-ref --verify --quiet "refs/heads/${BACKUP_BRANCH}"; then
-    log "${YELLOW}La rama ${BACKUP_BRANCH} ya existe. Omitiendo.${NC}"
-  else
-    git branch "$BACKUP_BRANCH" >>"$LOG_FILE" 2>&1 || die "No se pudo crear la rama de respaldo."
-  fi
+  git tag "$BACKUP_TAG" >>"$LOG_FILE" 2>&1 || die "No se pudo crear el tag de respaldo."
+  git branch "$BACKUP_BRANCH" >>"$LOG_FILE" 2>&1 || die "No se pudo crear la rama de respaldo."
 
   log "${GREEN}Respaldo creado correctamente:${NC}"
   log "  Tag:    ${BACKUP_TAG}"
@@ -268,13 +270,10 @@ run_checks() {
     return 0
   fi
 
-  if [ -f "package-lock.json" ]; then
-    log "Ejecutando npm install para asegurar lock consistente..."
-    npm install >>"$LOG_FILE" 2>&1 || die "npm install fallo."
-  else
-    log "Ejecutando npm install..."
-    npm install >>"$LOG_FILE" 2>&1 || die "npm install fallo."
-  fi
+  log "Ejecutando npm install..."
+  npm install >>"$LOG_FILE" 2>&1 || die "npm install fallo."
+
+  auto_commit_residual_changes "Automated dependency normalization during validation"
 
   log "Ejecutando TypeScript check..."
   npx tsc --noEmit >>"$LOG_FILE" 2>&1 || die "npx tsc --noEmit fallo."
@@ -318,6 +317,7 @@ merge_branch() {
 
   if git merge --no-ff -X theirs "$branch" -m "Merge branch '${branch}' into ${INTEGRATION_BRANCH}" >>"$LOG_FILE" 2>&1; then
     log "${GREEN}OK:${NC} Fusion completada: ${branch}"
+    auto_commit_residual_changes "Automated residual changes after merging '${branch}'"
     return 0
   fi
 
@@ -330,6 +330,8 @@ merge_branch() {
   git commit --no-edit >>"$LOG_FILE" 2>&1 || \
     git commit -m "Merge branch '${branch}' into ${INTEGRATION_BRANCH}" >>"$LOG_FILE" 2>&1 || \
     die "No se pudo completar el commit del merge de '${branch}'."
+
+  auto_commit_residual_changes "Automated dependency normalization after merging '${branch}'"
 
   log "${GREEN}OK:${NC} Fusion completada automaticamente tras resolver conflictos: ${branch}"
 }
@@ -396,8 +398,8 @@ main() {
 
   check_git_repo
 
-  # Si el script anterior quedo detenido en conflicto, esto lo resuelve primero.
   complete_merge_if_in_progress
+  auto_commit_residual_changes "Automated cleanup before continuing integration"
 
   check_clean_worktree
   ensure_base_updated
@@ -481,4 +483,3 @@ main() {
 }
 
 main "$@"
-

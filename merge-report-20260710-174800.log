@@ -69,3 +69,6 @@ npm warn allow-scripts
 npm warn allow-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
 [0;32mOK:[0m package-lock.json regenerado con npm install.
 [0;32mOK:[0m conflictos resueltos automaticamente.
+[integration/wtracker-v2.2-merge 1cb9cfa] Merge branch 'fix-xss-pdf-generation' into integration/wtracker-v2.2-merge
+[0;32mOK:[0m merge pendiente completado automaticamente.
+[0;31mERROR:[0m Tu arbol de trabajo no esta limpio. Hay cambios fuera de un merge. Haz commit, stash o limpia antes de continuar.

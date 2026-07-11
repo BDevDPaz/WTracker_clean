@@ -1,0 +1,17 @@
+
+[0;34m============================================================[0m
+[0;34mInicio de integracion automatica WTracker[0m
+[0;34m============================================================[0m
+Base branch:        main
+Integration branch: integration/wtracker-v2.2-merge
+Run checks:         0
+Auto push:          0
+Log file:           merge-report-20260710-175446.log
+
+[0;34m============================================================[0m
+[0;34mCambios residuales detectados[0m
+[0;34m============================================================[0m
+Se encontraron cambios fuera de un merge. Se agregaran y confirmaran automaticamente.
+ M merge-report-20260710-174800.log
+ M merge_wtracker_branches.sh
+?? merge-report-20260710-175446.log
