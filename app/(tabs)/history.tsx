@@ -203,6 +203,9 @@ function HistoryScreenComponent() {
       onPress={() => openEdit(item)}
       onLongPress={() => handleDelete(item.id!)}
       activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={`Sesión del ${formatDate(item.start_time)} en ${item.address}`}
+      accessibilityHint="Toca para editar, mantén presionado para eliminar"
     >
       <LuxuryCard style={styles.card}>
         <View style={styles.row}>
@@ -267,6 +270,17 @@ function HistoryScreenComponent() {
             ESTA SEMANA: <Text style={{ color: '#FFF' }}>{totalHours.toFixed(1)}h</Text> •{' '}
             <Text style={{ color: COLORS.gold }}>${estEarnings.toFixed(0)}</Text>
           </Text>
+        </View>
+
+        <TouchableOpacity
+          style={styles.pdfBtn}
+          onPress={() => generateWeeklyReport(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Generar reporte PDF"
+        >
+          <Ionicons name="document-text" size={16} color="#000" />
+          <Text style={styles.pdfText}>PDF</Text>
+        </TouchableOpacity>
       </View>
 
       <FlatList
@@ -283,13 +297,12 @@ function HistoryScreenComponent() {
         <View style={styles.modalHeader}>
           <Text style={styles.modalTitle}>EDITAR REGISTRO</Text>
           <TouchableOpacity
-            testID='history-edit-close'
-            accessibilityRole='button'
-            accessibilityLabel='Cerrar modal de edición'
             onPress={() => setEditModalVisible(false)}
             style={styles.closeBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Cerrar modal de edición"
           >
-            <Ionicons name='close' size={20} color={COLORS.textSecondary} />
+            <Ionicons name="close" size={20} color={COLORS.textSecondary} />
           </TouchableOpacity>
         </View>
 
