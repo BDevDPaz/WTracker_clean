@@ -98,9 +98,9 @@ export const translations = {
     
     admin_zone: "ZONA ADMIN",
     admin_unlock: "Desbloquear",
-    admin_access_key_placeholder: "PIN de Acceso",
+    admin_pin_placeholder: "PIN de Acceso Admin",
     admin_locked_msg: "Configuración de empresa bloqueada.",
-    err_access_denied: "Acceso denegado",
+    err_pin_wrong: "PIN incorrecto",
 
     // --- AUDITORÍA PDF ---
     pdf_audit_title: "AUDITORÍA DE INTEGRIDAD DE DATOS",
@@ -206,9 +206,9 @@ export const translations = {
     
     admin_zone: "ADMIN ZONE",
     admin_unlock: "Unlock",
-    admin_access_key_placeholder: "Admin Access PIN",
+    admin_pin_placeholder: "Admin PIN",
     admin_locked_msg: "Company settings locked.",
-    err_access_denied: "Access denied",
+    err_pin_wrong: "Incorrect PIN",
 
     // --- AUDIT PDF ---
     pdf_audit_title: "DATA INTEGRITY AUDIT LOG",

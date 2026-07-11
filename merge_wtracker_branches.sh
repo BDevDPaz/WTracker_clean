@@ -135,12 +135,23 @@ regenerate_lock_if_needed() {
 auto_resolve_path_preferring_theirs() {
   local file="$1"
 
-  # If stage 3 exists, Git has a "theirs" version.
-  # If stage 3 does not exist, the incoming branch deleted the file,
-  # so preferring theirs means removing it.
+  # If stage 3 exists, Git has an incoming/theirs version.
+  # If stage 3 does not exist, the incoming branch deleted the file.
   if git ls-files -u -- "$file" | awk '$3 == "3" { found=1 } END { exit found ? 0 : 1 }'; then
-    git checkout --theirs -- "$file" >>"$LOG_FILE" 2>&1 || die "No se pudo aplicar --theirs en $file."
-    git add "$file" >>"$LOG_FILE" 2>&1 || die "No se pudo agregar $file."
+    if git checkout --theirs -- "$file" >>"$LOG_FILE" 2>&1; then
+      if [ -e "$file" ]; then
+        git add "$file" >>"$LOG_FILE" 2>&1 || {
+          log "${YELLOW}git add fallo para ${file}. Intentando resolver como eliminacion.${NC}"
+          git rm -f -- "$file" >>"$LOG_FILE" 2>&1 || die "No se pudo agregar ni eliminar $file."
+        }
+      else
+        log "${YELLOW}${file} no existe despues de aplicar --theirs. Aplicando eliminacion.${NC}"
+        git rm -f -- "$file" >>"$LOG_FILE" 2>&1 || die "No se pudo eliminar $file."
+      fi
+    else
+      log "${YELLOW}No se pudo aplicar --theirs en ${file}. Intentando resolver como eliminacion.${NC}"
+      git rm -f -- "$file" >>"$LOG_FILE" 2>&1 || die "No se pudo aplicar --theirs ni eliminar $file."
+    fi
   else
     log "${YELLOW}La rama entrante elimino ${file}. Aplicando eliminacion.${NC}"
     git rm -f -- "$file" >>"$LOG_FILE" 2>&1 || die "No se pudo eliminar $file."
