@@ -1,11 +1,12 @@
+// src/feedback/feedbackAnalytics.ts
+import { LogCategory, LogSeverity } from '../types';
+
 const feedbackAnalyticsTrace = (...args: unknown[]) => {
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
     console.debug('[feedbackAnalytics]', ...args);
   }
 };
 
-// src/feedback/feedbackAnalytics.ts
-import { LogCategory, LogSeverity } from '../types';
 
 export interface FeedbackEvent {
   timestamp: number;
