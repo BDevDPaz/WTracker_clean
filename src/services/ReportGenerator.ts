@@ -177,7 +177,7 @@ export const generateWeeklyReport = async (shouldShare: boolean = true, customRa
         </head>
         <body>
           <div class="header">
-            <div class="title">LED TRACKER</div>
+            <div class="title">WTracker</div>
             <div class="subtitle">Reporte Oficial de Nómina y Auditoría</div>
           </div>
 
@@ -190,7 +190,7 @@ export const generateWeeklyReport = async (shouldShare: boolean = true, customRa
             </div>
             <div class="info-col" style="text-align: right;">
               <div class="info-label">Empresa</div>
-              <div class="info-value">${escapeHTML(settings.employer_name || 'LEON\'S ELECTRICAL DESIGN')}</div>
+              <div class="info-value">${escapeHtml(settings.employer_name || "COMPANY_NAME")}</div>
               <div class="info-label">Rango del Reporte</div>
               <div class="info-value">${rangeTitle}</div>
             </div>
@@ -256,8 +256,8 @@ export const generateWeeklyReport = async (shouldShare: boolean = true, customRa
           </div>
 
           <div class="footer">
-            Documento generado electrónicamente por LED Tracker App.<br>
-            Certificado digitalmente: ${new Date().toISOString()}
+            Documento generado electrónicamente por WTracker App.<br>
+            Certificado digitalmente: ${dayjs().tz().format('YYYY-MM-DD HH:mm:ss Z')}
           </div>
         </body>
       </html>

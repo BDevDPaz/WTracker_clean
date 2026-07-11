@@ -44,7 +44,8 @@ app-example
 /android
 .env
 .vscode/
+coverage/
 
-# Local merge automation artifacts
-merge-report-*.log
-.git/merge-logs/
+# Testing and logs
+coverage/
+*.log

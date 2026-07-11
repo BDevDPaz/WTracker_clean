@@ -4,7 +4,7 @@ import dayjs from '../utils/dayjsSetup';
 import { WorkSession, AppSettings, SessionStatus } from '../types';
 import { log, logAudit, setLoggerDB, AUDIT_ACTIONS } from '../utils/logger';
 
-const DB_NAME = 'ledtracker_v2.db';
+const DB_NAME = 'wtracker_v1.db';
 
 let db: SQLite.SQLiteDatabase | null = null;
 let initPromise: Promise<SQLite.SQLiteDatabase> | null = null;
@@ -126,7 +126,7 @@ export async function initDatabase(): Promise<SQLite.SQLiteDatabase> {
       `INSERT OR IGNORE INTO settings (
         id, employee_name, employer_name, company_email,
         tolerance_radius, hourly_rate, language, start_time, overtime_multiplier
-      ) VALUES (1, 'Empleado Nuevo', 'LEON''S ELECTRICAL DESIGN', '', 200, 25.0, 'es', '07:00', 1.5)`
+      ) VALUES (1, 'Empleado Nuevo', 'COMPANY_NAME', '', 200, 25.0, 'es', '07:00', 1.5)`
     );
 
     if (result.changes > 0) {
@@ -377,18 +377,17 @@ export const getTotalDurationMs = async (
 
   const result = await database.getFirstAsync<{ total_ms: number }>(
     `SELECT SUM(
-        MAX(
-          0,
+        MAX(0,
           COALESCE(end_time, ?) - COALESCE(actual_start_time, start_time) -
-          (CASE
+          CASE
             WHEN lunch_taken = 1 AND lunch_start IS NOT NULL AND lunch_end IS NOT NULL
-            THEN (lunch_end - lunch_start)
-            WHEN lunch_taken = 1
-            THEN 3600000
+              THEN (lunch_end - lunch_start)
+            WHEN lunch_taken = 1 AND (COALESCE(end_time, ?) - COALESCE(actual_start_time, start_time)) > 21600000
+              THEN 3600000
             ELSE 0
-          END)
+          END
         )
-      ) as total_ms
+      ) AS total_ms
      FROM work_sessions
      WHERE status NOT IN ('deleted', 'pending_arrival')
        AND start_time >= ?`,
