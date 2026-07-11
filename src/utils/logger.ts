@@ -1,4 +1,3 @@
-// --- src/utils/logger.ts ---
 import * as SQLite from 'expo-sqlite';
 import {
   LogColor,
@@ -45,22 +44,22 @@ export interface AuditLogEntry {
   timestamp: number;
 }
 
-// ✅ [P0-CRITICAL] Formato seguro de metadatos con manejo de Errores
+// ✅ [P0-CRITICAL] Formato seguro de metadatos con manejo de Errores y mitigación de desbordamiento en BD
 const formatMetadata = (meta?: any): string | undefined => {
   if (!meta) return undefined;
-  
-  // Caso 1: Error objects - extraer propiedades manualmente (JSON.stringify no funciona)
+
+  // Caso 1: Error objects - extraer propiedades manualmente (JSON.stringify por defecto los deja vacíos)
   if (meta instanceof Error) {
     return JSON.stringify({
       message: meta.message,
       name: meta.name,
       code: (meta as any).code,
-      // Stack truncado a 500 chars para no saturar BD
+      // Stack truncado a 500 chars para no saturar la base de datos
       stack: meta.stack ? meta.stack.substring(0, 500) : undefined
     });
   }
-  
-  // Caso 2: Objetos normales - truncar si exceden 1KB
+
+  // Caso 2: Objetos normales - truncar si exceden 1KB para prevenir picos de memoria
   try {
     const stringified = JSON.stringify(meta);
     if (stringified.length > 1000) {
@@ -68,12 +67,11 @@ const formatMetadata = (meta?: any): string | undefined => {
     }
     return stringified;
   } catch (e) {
-    // Fallback si JSON.stringify falla (circular references, etc)
+    // Fallback si JSON.stringify falla por referencias circulares
     return `[Circular or Complex Object]`;
   }
 };
 
-// Vincula la DB al logger y procesa los pendientes
 export const setLoggerDB = (db: SQLite.SQLiteDatabase) => {
   dbInstance = db;
   void flushQueues();
@@ -131,58 +129,16 @@ const flushQueues = async () => {
   }
 };
 
-export const logAudit = async (entry: AuditLogEntry): Promise<void> => {
-  if (dbInstance) {
-    try {
-      await dbInstance.runAsync(
-        `INSERT INTO audit_logs (session_id, action_type, details, timestamp) VALUES (?, ?, ?, ?)`,
-        [entry.session_id, entry.action_type, entry.details, entry.timestamp]
-      );
-    } catch (e) {
-      _output.error('❌ Error saving audit log:', e);
-      auditQueue.push(entry);
-    }
-  } else {
-    auditQueue.push(entry);
+const getIconByColor = (color: LogColor): string => {
+  switch (color) {
+    case 'VERDE': return '🟢';
+    case 'AMARILLO': return '🟡';
+    case 'NARANJA': return '🟠';
+    case 'AZUL': return '🔵';
+    case 'BLANCO': return '⚪';
+    case 'ROJO': return '🔴';
+    default: return '⚪';
   }
-};
-
-function safeSerializeMetadata(metadata: unknown): string | undefined {
-  if (metadata === undefined) return undefined;
-  try {
-    if (metadata instanceof Error) {
-      return JSON.stringify({ name: metadata.name, message: metadata.message, stack: metadata.stack }, null, 0);
-    }
-    return JSON.stringify(metadata);
-  } catch {
-    return '[unserializable-metadata]';
-  }
-}
-
-function getIconByColor(color: LogColor): string {
-  const icons: Record<LogColor, string> = {
-    'VERDE': '🟢', 'AMARILLO': '🟡', 'NARANJA': '🟠', 'AZUL': '🔵', 'BLANCO': '⚪️', 'ROJO': '🔴'
-  };
-  return icons[color] || '•';
-}
-
-function levelToColor(level: LogSeverity): LogColor {
-  switch (level) {
-    case 'ERROR': return 'ROJO';
-    case 'WARN': return 'AMARILLO';
-    case 'EVENT': return 'NARANJA';
-    case 'DEBUG': return 'BLANCO';
-    default: return 'AZUL';
-  }
-}
-
-export const logStructured = (
-  level: LogSeverity,
-  category: LogCategory,
-  message: string,
-  metadata?: LogMetadata
-): void => {
-  log(levelToColor(level), category, level, message, metadata);
 };
 
 export const log = (
@@ -191,12 +147,8 @@ export const log = (
   severidad: LogSeverity,
   mensaje: string,
   metadata?: any
-) => {
-  const now = new Date();
-  const timestamp = now.getTime();
-  const timestamp_str = now.toISOString();
-
-  // ✅ Usar formatMetadata en lugar de JSON.stringify directo
+): void => {
+  const now = dayjs();
   const formattedMeta = formatMetadata(metadata);
 
   const entry: SystemLogEntry = {
@@ -206,29 +158,25 @@ export const log = (
     categoria,
     severidad,
     mensaje,
-    metadata: formattedMeta
+    metadata: formattedMeta ?? undefined,
   };
 
   const icon = getIconByColor(color);
   const consoleMsg = `[${entry.timestamp_str}] ${icon} [${categoria}] ${mensaje}`;
 
-  if (severidad === 'ERROR') _output.error(consoleMsg, metadata ?? '');
-  else if (severidad === 'WARN') _output.warn(consoleMsg, metadata ?? '');
-  else _output.info(consoleMsg, metadata ?? '');
-
-  // ✅ CORRECCIÓN: Evita la Pantalla Roja de Expo para eventos de auditoría (como borrar un registro).
-  // Solo lanza un console.error si realmente estamos pasando un objeto de Error real al metadata.
-  if (severidad === 'ERROR' && metadata instanceof Error) {
-    console.error(consoleMsg, metadata);
+  // Evita interrupciones en el árbol de renderizado de Expo (Pantallas Rojas invasivas)
+  if (severidad === 'ERROR') {
+    if (metadata instanceof Error) {
+      _output.error(consoleMsg, metadata);
+    } else {
+      _output.error(consoleMsg, formattedMeta ? JSON.parse(formattedMeta) : '');
+    }
   } else if (severidad === 'WARN') {
-    console.warn(consoleMsg, formattedMeta ? JSON.parse(formattedMeta) : '');
+    _output.warn(consoleMsg, formattedMeta ? JSON.parse(formattedMeta) : '');
   } else {
-    // Usamos console.log para todo lo demás, preservando tus colores e iconos, 
-    // pero sin interrumpir el uso de la aplicación.
-    console.log(consoleMsg, formattedMeta ? JSON.parse(formattedMeta) : '');
+    _output.info(consoleMsg, formattedMeta ? JSON.parse(formattedMeta) : '');
   }
 
-  // Guardar en la DB o mandar a la cola si la DB no está lista
   if (dbInstance) {
     dbInstance.runAsync(
       `INSERT INTO system_logs (timestamp, timestamp_str, color, categoria, severidad, mensaje, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -240,4 +188,25 @@ export const log = (
   } else {
     logQueue.push(entry);
   }
+
+  emitFeedbackFromLog(severidad, categoria, mensaje);
 };
+
+
+export function logStructured(
+  severidad: string,
+  categoria: string,
+  mensaje: string,
+  metadata?: unknown
+) {
+  return log('AZUL', categoria as Parameters<typeof log>[1], severidad as Parameters<typeof log>[2], mensaje, metadata);
+}
+
+
+export function logAudit(...args: unknown[]) {
+  const action = String(args[0] ?? 'AUDIT');
+  const message = String(args[1] ?? action);
+  const metadata = args.length > 2 ? args[2] : undefined;
+  return log('AZUL', action as Parameters<typeof log>[1], 'INFO' as Parameters<typeof log>[2], message, metadata);
+}
+

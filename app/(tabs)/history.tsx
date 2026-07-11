@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import React, { memo, useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import dayjs from 'dayjs';
 import { useRouter } from 'expo-router';
@@ -195,12 +195,9 @@ function HistoryScreenComponent() {
     }
   };
 
-    const renderItem = useCallback(({ item }: { item: WorkSession }) => (
+  const renderItem = useCallback(({ item }: { item: WorkSession }) => (
     <TouchableOpacity
       testID={`history-record-${item.id}`}
-      accessibilityRole='button'
-      accessibilityLabel='Editar registro'
-      accessibilityHint='Mantén presionado para eliminar el registro'
       onPress={() => openEdit(item)}
       onLongPress={() => handleDelete(item.id!)}
       activeOpacity={0.7}
@@ -266,22 +263,11 @@ function HistoryScreenComponent() {
       </View>
 
       <View style={styles.summaryContainer}>
-          <Text style={styles.header}>HISTORIAL</Text>
-          <Text style={styles.subHeader}>
-            ESTA SEMANA: <Text style={{ color: '#FFF' }}>{totalHours.toFixed(1)}h</Text> •{' '}
-            <Text style={{ color: COLORS.gold }}>${estEarnings.toFixed(0)}</Text>
-          </Text>
-        </View>
-
-        <TouchableOpacity
-          style={styles.pdfBtn}
-          onPress={() => generateWeeklyReport(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Generar reporte PDF"
-        >
-          <Ionicons name="document-text" size={16} color="#000" />
-          <Text style={styles.pdfText}>PDF</Text>
-        </TouchableOpacity>
+        <Text style={styles.header}>HISTORIAL</Text>
+        <Text style={styles.subHeader}>
+          ESTA SEMANA: <Text style={{ color: '#FFF' }}>{totalHours.toFixed(1)}h</Text> •{' '}
+          <Text style={{ color: COLORS.gold }}>${estEarnings.toFixed(0)}</Text>
+        </Text>
       </View>
 
       <FlatList
@@ -298,12 +284,13 @@ function HistoryScreenComponent() {
         <View style={styles.modalHeader}>
           <Text style={styles.modalTitle}>EDITAR REGISTRO</Text>
           <TouchableOpacity
+            testID='history-edit-close'
+            accessibilityRole='button'
+            accessibilityLabel='Cerrar modal de edición'
             onPress={() => setEditModalVisible(false)}
             style={styles.closeBtn}
-            accessibilityRole="button"
-            accessibilityLabel="Cerrar modal de edición"
           >
-            <Ionicons name="close" size={20} color={COLORS.textSecondary} />
+            <Ionicons name='close' size={20} color={COLORS.textSecondary} />
           </TouchableOpacity>
         </View>
 
@@ -456,3 +443,4 @@ const styles = StyleSheet.create({
 });
 
 export default memo(HistoryScreenComponent);
+

@@ -5,14 +5,13 @@ import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-
-// Servicios
-import { BackgroundTasks } from '../src/services/BackgroundTasks';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { BackgroundTasks, runFailsafeCheck } from '../src/services/BackgroundTasks';
+import { ensureWeeklyReportExists, checkAndDeliverPendingReports } from '../src/services/ReportGenerator';
+import { setupNotifications, scheduleDailyMorningNotification } from '../src/services/Notifications';
 import { log, setLoggerDB } from '../src/utils/logger';
 import { engine } from '../src/engine/workTrackerEngine';
 import { setGeofenceListener } from '../src/services/LocationManager';
-
-// Contextos
 import { LanguageProvider } from '../src/context/LanguageContext';
 import { LuxuryUIProvider } from '../src/context/LuxuryUIContext';
 import { useLogFeedback } from '../src/feedback/useLogFeedback';
@@ -45,13 +44,7 @@ export default function RootLayout() {
         const database = await initDatabase();
         setLoggerDB(database);
         setGeofenceListener(() => engine.dispatch({ type: 'SYNC_ACTIVE_SESSION' }));
-
-        log(
-          'AZUL',
-          'ESTADO_SISTEMA',
-          'INFO',
-          'Registrando Servicios de Fondo (Auto-Checkout)...'
-        );
+        log('AZUL', 'ESTADO_SISTEMA', 'INFO', 'Registrando Servicios de Fondo (Auto-Checkout)...');
         await BackgroundTasks.register();
         await setupNotifications();
         await scheduleDailyMorningNotification();
@@ -71,7 +64,7 @@ export default function RootLayout() {
           const lastCheckTime = lastCheck ? parseInt(lastCheck, 10) : 0;
           if (now - lastCheckTime > 60 * 60 * 1000) {
             log('AZUL', 'ESTADO_SISTEMA', 'DEBUG', 'Ejecutando verificaciones de respaldo (Failsafe + Reportes + Envíos)...');
-            await Promise.all([runFailsafeCheck(), ensureWeeklyReportExists(), checkAndDeliverPendingReports(), scheduleDailyMorningNotification()]);
+            await Promise.all([runFailsafeCheck(), ensureWeeklyReportExists(), checkAndDeliverPendingReports()]);
             await AsyncStorage.setItem(LAST_FAILSAFE_CHECK_KEY, now.toString());
           }
         } catch (e) { log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Fallo en verificaciones de respaldo', e); }
