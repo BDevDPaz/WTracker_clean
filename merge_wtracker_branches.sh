@@ -132,6 +132,21 @@ regenerate_lock_if_needed() {
   fi
 }
 
+auto_resolve_path_preferring_theirs() {
+  local file="$1"
+
+  # If stage 3 exists, Git has a "theirs" version.
+  # If stage 3 does not exist, the incoming branch deleted the file,
+  # so preferring theirs means removing it.
+  if git ls-files -u -- "$file" | awk '$3 == "3" { found=1 } END { exit found ? 0 : 1 }'; then
+    git checkout --theirs -- "$file" >>"$LOG_FILE" 2>&1 || die "No se pudo aplicar --theirs en $file."
+    git add "$file" >>"$LOG_FILE" 2>&1 || die "No se pudo agregar $file."
+  else
+    log "${YELLOW}La rama entrante elimino ${file}. Aplicando eliminacion.${NC}"
+    git rm -f -- "$file" >>"$LOG_FILE" 2>&1 || die "No se pudo eliminar $file."
+  fi
+}
+
 auto_resolve_unmerged_files() {
   local branch_name="${1:-rama-entrante}"
   local need_npm_install="0"
@@ -154,28 +169,39 @@ auto_resolve_unmerged_files() {
     case "$file" in
       package.json)
         log "${YELLOW}Conflicto en package.json:${NC} usando version de la rama entrante."
-        git checkout --theirs -- "$file" >>"$LOG_FILE" 2>&1 || die "No se pudo aplicar --theirs en $file."
-        git add "$file" >>"$LOG_FILE" 2>&1 || die "No se pudo agregar $file."
+        auto_resolve_path_preferring_theirs "$file"
         need_npm_install="1"
         ;;
 
       package-lock.json)
         log "${YELLOW}Conflicto en package-lock.json:${NC} usando version entrante y luego regenerando."
-        git checkout --theirs -- "$file" >>"$LOG_FILE" 2>&1 || true
-        git add "$file" >>"$LOG_FILE" 2>&1 || true
+        auto_resolve_path_preferring_theirs "$file"
         need_npm_install="1"
+        ;;
+
+      bun.lock)
+        log "${YELLOW}Conflicto en bun.lock:${NC} aplicando preferencia de rama entrante."
+        auto_resolve_path_preferring_theirs "$file"
         ;;
 
       src/services/ReportGenerator.ts)
         log "${YELLOW}Conflicto en ReportGenerator.ts:${NC} usando version entrante para priorizar fixes de seguridad/reportes."
-        git checkout --theirs -- "$file" >>"$LOG_FILE" 2>&1 || die "No se pudo aplicar --theirs en $file."
-        git add "$file" >>"$LOG_FILE" 2>&1 || die "No se pudo agregar $file."
+        auto_resolve_path_preferring_theirs "$file"
+        ;;
+
+      scripts/audit/reports/*)
+        log "${YELLOW}Conflicto en reporte generado ${file}:${NC} aplicando version entrante."
+        auto_resolve_path_preferring_theirs "$file"
+        ;;
+
+      coverage/*)
+        log "${YELLOW}Conflicto en coverage ${file}:${NC} aplicando version entrante."
+        auto_resolve_path_preferring_theirs "$file"
         ;;
 
       *)
         log "${YELLOW}Conflicto en ${file}:${NC} usando version de la rama entrante."
-        git checkout --theirs -- "$file" >>"$LOG_FILE" 2>&1 || die "No se pudo aplicar --theirs en $file."
-        git add "$file" >>"$LOG_FILE" 2>&1 || die "No se pudo agregar $file."
+        auto_resolve_path_preferring_theirs "$file"
         ;;
     esac
   done <<< "$files"

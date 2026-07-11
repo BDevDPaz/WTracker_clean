@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { memo, useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, SafeAreaView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import dayjs from 'dayjs';
@@ -22,11 +22,12 @@ import { WorkSession } from '../../src/engine/contracts/types';
 import { formatDate, formatTime } from '../../src/utils/dateUtils';
 import { log } from '../../src/utils/logger';
 import { generateWeeklyReport } from '../../src/services/ReportGenerator';
+import { calculateSessionMinutes, calculatePayFromMinutes } from '../../src/utils/payrollUtils';
 import { useLuxuryUI } from '../../src/context/LuxuryUIContext';
 import { historyEditSchema } from '../../src/utils/validation';
 import { z } from 'zod';
 
-export default function HistoryScreen() {
+function HistoryScreenComponent() {
   const router = useRouter();
   const { showToast, showDialog } = useLuxuryUI();
   const [sessions, setSessions] = useState<WorkSession[]>([]);
@@ -48,15 +49,28 @@ export default function HistoryScreen() {
       const settings = await getSettings();
       const rate = settings?.hourly_rate || 0;
 
-      let hours = 0;
+      let totalMinutes = 0;
+      let totalEstPay = 0;
+      const otMultiplier = settings?.overtime_multiplier || 1.5;
+
       data.forEach((s: WorkSession) => {
         if (s.start_time && s.end_time) {
-          const diff = (s.end_time - s.start_time) / 3600000;
-          hours += diff;
+          const sessionMinutes = calculateSessionMinutes(
+            s.start_time,
+            s.end_time,
+            s.lunch_taken,
+            s.lunch_start,
+            s.lunch_end
+          );
+          totalMinutes += sessionMinutes;
+
+          const { totalPay } = calculatePayFromMinutes(sessionMinutes, rate, otMultiplier);
+          totalEstPay += totalPay;
         }
       });
-      setTotalHours(hours);
-      setEstEarnings(hours * rate);
+
+      setTotalHours(totalMinutes / 60);
+      setEstEarnings(totalEstPay);
     } catch (_e) {
       log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error cargando historial', _e);
     }
@@ -142,7 +156,7 @@ export default function HistoryScreen() {
           'AMARILLO',
           'ADVERTENCIA',
           'WARN',
-          'Horario choca con otra sesión. Revisa la hora e inténtalo nuevamente.'
+          'Horario en conflicto con otra sesión. Por favor, verifica las horas.'
         );
         showToast('Horario en conflicto', 'error');
         return;
@@ -180,7 +194,7 @@ export default function HistoryScreen() {
     }
   };
 
-  const renderItem = ({ item }: { item: WorkSession }) => (
+    const renderItem = useCallback(({ item }: { item: WorkSession }) => (
     <TouchableOpacity
       testID={`history-record-${item.id}`}
       accessibilityRole='button'
@@ -206,7 +220,7 @@ export default function HistoryScreen() {
           </View>
         </View>
 
-        <Text style={styles.address}>{item.address}</Text>
+        <Text style={styles.address} numberOfLines={1} ellipsizeMode="tail">{item.address}</Text>
 
         <View style={styles.timeContainer}>
           <Text style={styles.time}>{formatTime(item.start_time)}</Text>
@@ -215,7 +229,7 @@ export default function HistoryScreen() {
         </View>
       </LuxuryCard>
     </TouchableOpacity>
-  );
+  ), [openEdit, handleDelete]);
 
   return (
     <SafeAreaView testID='history-screen' style={styles.container}>
@@ -426,3 +440,5 @@ const styles = StyleSheet.create({
   },
   closeBtn: { padding: 5 },
 });
+
+export default memo(HistoryScreenComponent);

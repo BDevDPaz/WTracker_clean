@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { memo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,7 +10,7 @@ import { useLanguage } from '../../src/context/LanguageContext';
 import { generateWeeklyReport, sendReportByEmail } from '../../src/services/ReportGenerator';
 import { getSettings } from '../../src/database/db';
 
-export default function ReportScreen() {
+function ReportScreenComponent() {
   const router = useRouter();
   const { showToast } = useLuxuryUI();
   const { t } = useLanguage();
@@ -30,9 +30,9 @@ export default function ReportScreen() {
 
     if (pdfUri && settings) {
         await sendReportByEmail(pdfUri, settings);
-        showToast('Abriendo correo...', 'success');
+        showToast('Abriendo aplicación de correo...', 'success');
     } else {
-        showToast('Error al preparar correo', 'error');
+        showToast('No se pudo preparar el correo electrónico', 'error');
     }
     setIsProcessing(false);
   };
@@ -151,3 +151,5 @@ const styles = StyleSheet.create({
   actions: { width: '100%' },
   footerNote: { fontFamily: 'Montserrat_400Regular', color: '#555', textAlign: 'center', fontSize: 11, marginTop: 40, fontStyle: 'italic', paddingHorizontal: 20 }
 });
+
+export default memo(ReportScreenComponent);
