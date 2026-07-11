@@ -1,112 +1,246 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+export const GEOFENCE_STATE_KEY = 'WTRACKER_GEOFENCE_STATE';
+
 export enum GeofenceState {
   OUTSIDE = 'OUTSIDE',
   ENTERING = 'ENTERING',
   INSIDE = 'INSIDE',
-  EXITING = 'EXITING'
+  EXITING = 'EXITING',
 }
 
-export const GEOFENCE_STATE_KEY = 'GEOFENCE_HYSTERESIS_STATE';
-export const GEOFENCE_SAMPLES_KEY = 'GEOFENCE_HYSTERESIS_SAMPLES';
+export type GeofenceEventName = 'Enter' | 'Exit';
+
+export type GeofenceTransition = 'STAY' | 'ENTERED' | 'EXITED';
+
+type StorageLike = Pick<
+  typeof AsyncStorage,
+  'getItem' | 'setItem' | 'removeItem'
+>;
+
+type SampleState = {
+  state: GeofenceState;
+  enterSamples: number;
+  exitSamples: number;
+};
 
 const REQUIRED_SAMPLES = 3;
 
-export interface IStorage {
-    getItem(key: string): Promise<string | null>;
-    setItem(key: string, value: string): Promise<void>;
-    removeItem(key: string): Promise<void>;
-}
+const getStateKey = (siteIdentifier: string): string => {
+  return `${GEOFENCE_STATE_KEY}_${siteIdentifier}`;
+};
+
+const getSamplesKey = (siteIdentifier: string): string => {
+  return `${GEOFENCE_STATE_KEY}_${siteIdentifier}_SAMPLES`;
+};
 
 export class LocationFSM {
-  private storage: IStorage;
+  private storage: StorageLike;
   private mutex: Promise<void> = Promise.resolve();
 
-  constructor(storage: IStorage) {
+  constructor(storage: StorageLike = AsyncStorage) {
     this.storage = storage;
   }
 
-  /**
-   * Safe state transition with internal mutex to prevent race conditions
-   * when multiple geofence events fire in rapid succession.
-   */
-  async update(eventType: 'Enter' | 'Exit', siteIdentifier: string): Promise<{ transition: 'ENTERED' | 'EXITED' | 'STAY' }> {
-    const release = await this.acquireMutex();
-    const stateKey = `${GEOFENCE_STATE_KEY}_${siteIdentifier}`;
-    const samplesKey = `${GEOFENCE_SAMPLES_KEY}_${siteIdentifier}`;
+  async update(
+    eventName: GeofenceEventName,
+    siteIdentifier: string
+  ): Promise<{ transition: GeofenceTransition; state: GeofenceState }> {
+    return this.withLock(async () => {
+      const current = await this.readSampleState(siteIdentifier);
 
-    try {
-      const currentState = (await this.storage.getItem(stateKey)) as GeofenceState || GeofenceState.OUTSIDE;
-      const currentSamples = parseInt((await this.storage.getItem(samplesKey)) || '0', 10);
-
-      let nextState = currentState;
-      let nextSamples = currentSamples;
-      let transition: 'ENTERED' | 'EXITED' | 'STAY' = 'STAY';
-
-      if (eventType === 'Enter') {
-        if (currentState === GeofenceState.OUTSIDE || currentState === GeofenceState.EXITING) {
-          nextState = GeofenceState.ENTERING;
-          nextSamples = 1;
-        } else if (currentState === GeofenceState.ENTERING) {
-          nextSamples++;
-          if (nextSamples >= REQUIRED_SAMPLES) {
-            nextState = GeofenceState.INSIDE;
-            nextSamples = 0;
-            transition = 'ENTERED';
-          }
-        }
-      } else if (eventType === 'Exit') {
-        if (currentState === GeofenceState.INSIDE || currentState === GeofenceState.ENTERING) {
-          nextState = GeofenceState.EXITING;
-          nextSamples = 1;
-        } else if (currentState === GeofenceState.EXITING) {
-          nextSamples++;
-          if (nextSamples >= REQUIRED_SAMPLES) {
-            nextState = GeofenceState.OUTSIDE;
-            nextSamples = 0;
-            transition = 'EXITED';
-          }
-        }
+      if (eventName === 'Enter') {
+        return await this.handleEnter(siteIdentifier, current);
       }
 
-      await Promise.all([
-        this.storage.setItem(stateKey, nextState),
-        this.storage.setItem(samplesKey, nextSamples.toString())
-      ]);
+      return await this.handleExit(siteIdentifier, current);
+    });
+  }
 
-      return { transition };
-    } finally {
-      release();
+  async reset(siteIdentifiers?: string[]): Promise<void> {
+    return this.withLock(async () => {
+      if (!siteIdentifiers || siteIdentifiers.length === 0) {
+        return;
+      }
+
+      await Promise.all(
+        siteIdentifiers.flatMap((siteIdentifier) => [
+          this.storage.removeItem(getStateKey(siteIdentifier)),
+          this.storage.removeItem(getSamplesKey(siteIdentifier)),
+        ])
+      );
+    });
+  }
+
+  private async handleEnter(
+    siteIdentifier: string,
+    current: SampleState
+  ): Promise<{ transition: GeofenceTransition; state: GeofenceState }> {
+    if (current.state === GeofenceState.INSIDE) {
+      return {
+        transition: 'STAY',
+        state: GeofenceState.INSIDE,
+      };
+    }
+
+    const next: SampleState = {
+      state: GeofenceState.ENTERING,
+      enterSamples: current.enterSamples + 1,
+      exitSamples: 0,
+    };
+
+    if (next.enterSamples >= REQUIRED_SAMPLES) {
+      const committed: SampleState = {
+        state: GeofenceState.INSIDE,
+        enterSamples: 0,
+        exitSamples: 0,
+      };
+
+      await this.writeSampleState(siteIdentifier, committed);
+
+      return {
+        transition: 'ENTERED',
+        state: GeofenceState.INSIDE,
+      };
+    }
+
+    await this.writeSampleState(siteIdentifier, next);
+
+    return {
+      transition: 'STAY',
+      state: GeofenceState.ENTERING,
+    };
+  }
+
+  private async handleExit(
+    siteIdentifier: string,
+    current: SampleState
+  ): Promise<{ transition: GeofenceTransition; state: GeofenceState }> {
+    if (current.state === GeofenceState.OUTSIDE) {
+      return {
+        transition: 'STAY',
+        state: GeofenceState.OUTSIDE,
+      };
+    }
+
+    const next: SampleState = {
+      state: GeofenceState.EXITING,
+      enterSamples: 0,
+      exitSamples: current.exitSamples + 1,
+    };
+
+    if (next.exitSamples >= REQUIRED_SAMPLES) {
+      const committed: SampleState = {
+        state: GeofenceState.OUTSIDE,
+        enterSamples: 0,
+        exitSamples: 0,
+      };
+
+      await this.writeSampleState(siteIdentifier, committed);
+
+      return {
+        transition: 'EXITED',
+        state: GeofenceState.OUTSIDE,
+      };
+    }
+
+    await this.writeSampleState(siteIdentifier, next);
+
+    return {
+      transition: 'STAY',
+      state: GeofenceState.EXITING,
+    };
+  }
+
+  private async readSampleState(siteIdentifier: string): Promise<SampleState> {
+    const stateRaw = await this.storage.getItem(getStateKey(siteIdentifier));
+    const samplesRaw = await this.storage.getItem(getSamplesKey(siteIdentifier));
+
+    const state = this.parseGeofenceState(stateRaw);
+    const samples = this.parseSamples(samplesRaw);
+
+    return {
+      state,
+      enterSamples: samples.enterSamples,
+      exitSamples: samples.exitSamples,
+    };
+  }
+
+  private async writeSampleState(
+    siteIdentifier: string,
+    value: SampleState
+  ): Promise<void> {
+    await Promise.all([
+      this.storage.setItem(getStateKey(siteIdentifier), value.state),
+      this.storage.setItem(
+        getSamplesKey(siteIdentifier),
+        JSON.stringify({
+          enterSamples: value.enterSamples,
+          exitSamples: value.exitSamples,
+        })
+      ),
+    ]);
+  }
+
+  private parseGeofenceState(raw: string | null): GeofenceState {
+    if (
+      raw === GeofenceState.OUTSIDE ||
+      raw === GeofenceState.ENTERING ||
+      raw === GeofenceState.INSIDE ||
+      raw === GeofenceState.EXITING
+    ) {
+      return raw;
+    }
+
+    return GeofenceState.OUTSIDE;
+  }
+
+  private parseSamples(raw: string | null): {
+    enterSamples: number;
+    exitSamples: number;
+  } {
+    if (!raw) {
+      return {
+        enterSamples: 0,
+        exitSamples: 0,
+      };
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as Partial<{
+        enterSamples: number;
+        exitSamples: number;
+      }>;
+
+      return {
+        enterSamples:
+          typeof parsed.enterSamples === 'number' ? parsed.enterSamples : 0,
+        exitSamples:
+          typeof parsed.exitSamples === 'number' ? parsed.exitSamples : 0,
+      };
+    } catch {
+      return {
+        enterSamples: 0,
+        exitSamples: 0,
+      };
     }
   }
 
-  async reset(siteIdentifiers?: string[]) {
-    const release = await this.acquireMutex();
-    try {
-      if (siteIdentifiers && siteIdentifiers.length > 0) {
-        const cleanup = siteIdentifiers.flatMap(id => [
-          this.storage.removeItem(`${GEOFENCE_STATE_KEY}_${id}`),
-          this.storage.removeItem(`${GEOFENCE_SAMPLES_KEY}_${id}`)
-        ]);
-        await Promise.all(cleanup);
-      } else {
-        // Fallback or legacy cleanup
-        await Promise.all([
-          this.storage.removeItem(GEOFENCE_STATE_KEY),
-          this.storage.removeItem(GEOFENCE_SAMPLES_KEY)
-        ]);
-      }
-    } finally {
-      release();
-    }
-  }
+  private async withLock<T>(work: () => Promise<T>): Promise<T> {
+    const previous = this.mutex;
+    let release!: () => void;
 
-  private async acquireMutex(): Promise<() => void> {
-    let release: () => void;
-    const nextMutex = new Promise<void>((resolve) => {
+    this.mutex = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const currentMutex = this.mutex;
-    this.mutex = nextMutex;
-    await currentMutex;
-    return release!;
+
+    await previous;
+
+    try {
+      return await work();
+    } finally {
+      release();
+    }
   }
 }
+

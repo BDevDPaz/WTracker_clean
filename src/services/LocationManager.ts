@@ -4,12 +4,21 @@ import * as Notifications from 'expo-notifications';
 import * as Location from 'expo-location';
 
 import { log, logStructured } from '../utils/logger';
-import { ensureDbReady, insertAuditLog, getAllAsync } from '../database/db';
+import {
+  ensureDbReady,
+  insertAuditLog,
+  getAllAsync,
+  updateSessionStatus,
+} from '../database/db';
 import { WorkSession } from '../types';
 import dayjs from '../utils/dayjsSetup';
 import { LocationFSM } from './LocationFSM';
 import { locationAdapter } from '../runtime/locationAdapter';
-import { getDistanceFromLatLonInMeters } from '../utils/geoUtils';
+import {
+  getDistanceFromLatLonInMeters,
+  isBeyondAutoCheckoutDistance,
+  AUTO_CHECKOUT_DISTANCE_METERS,
+} from '../utils/geoUtils';
 
 export const GEOFENCE_TASK = 'GEOFENCE_TRACKING_TASK';
 export const EXIT_TIMESTAMP_KEY = 'LAST_GEOFENCE_EXIT_TIMESTAMP';
@@ -23,129 +32,220 @@ interface GeofenceTaskData {
   region: Location.LocationRegion;
 }
 
-TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }: { data: any, error: any }) => {
-  if (error) {
-    log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error en callback de Geocerca', error);
-    return;
+type GeofenceListener = () => void;
+
+let geofenceListener: GeofenceListener | null = null;
+
+const getSessionCenterDistance = (
+  session: WorkSession,
+  currentPos: { latitude: number; longitude: number }
+): number => {
+  const centerLatitude =
+    session.target_latitude ??
+    session.latitude ??
+    session.setup_latitude ??
+    null;
+
+  const centerLongitude =
+    session.target_longitude ??
+    session.longitude ??
+    session.setup_longitude ??
+    null;
+
+  if (
+    typeof centerLatitude !== 'number' ||
+    typeof centerLongitude !== 'number'
+  ) {
+    return Number.POSITIVE_INFINITY;
   }
 
-  const { eventType, region } = data as GeofenceTaskData;
-  const siteId = region?.identifier;
+  return getDistanceFromLatLonInMeters(
+    centerLatitude,
+    centerLongitude,
+    currentPos.latitude,
+    currentPos.longitude
+  );
+};
 
-  if (!siteId) {
-    log('ROJO', 'ERROR_CRITICO', 'ERROR', "Geofencing event aborted: missing 'region.identifier' in task payload.");
-    return;
-  }
-
-  // ✅ NEW: Validate GPS accuracy
-  const currentPos = await locationAdapter.getCurrentLocation();
-
-  if (!currentPos) {
-    log('AMARILLO', 'GPS_DEBIL', 'WARN', 'No GPS signal, ignoring geofence event');
-    return;
-  }
-
-  if (currentPos.accuracy && currentPos.accuracy > MIN_ACCURACY_METERS) {
-    logStructured('WARN', 'GPS_DEBIL', `GPS accuracy ${currentPos.accuracy}m > ${MIN_ACCURACY_METERS}m, ignoring event`, {
-      geoAccuracy: currentPos.accuracy ?? undefined,
-      sessionId: parseInt(siteId, 10)
-    });
-    return;
-  }
-
-  const db = await ensureDbReady();
-
-  try {
-    const session = await db.getFirstAsync<WorkSession>(
-      "SELECT * FROM work_sessions WHERE id = ?",
-      [parseInt(siteId, 10)]
-    );
-
-    if (!session) {
-      log('AMARILLO', 'ADVERTENCIA', 'WARN', `Geocerca detectada para sitio desconocido ID: ${siteId}`);
+TaskManager.defineTask(
+  GEOFENCE_TASK,
+  async ({ data, error }: { data: any; error: any }) => {
+    if (error) {
+      log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error en callback de Geocerca', error);
       return;
     }
 
-    // ✅ NEW: Validate speed consistency (basic check)
-    if (session.latitude && session.longitude) {
-      const distanceM = getDistanceFromLatLonInMeters(
-        session.latitude, session.longitude,
-        currentPos.latitude, currentPos.longitude
-      );
+    const { eventType, region } = data as GeofenceTaskData;
+    const siteId = region?.identifier;
 
-      // Basic heuristic: if we are too far from the center for an 'Enter' event or
-      // suddenly jumped huge distance, log it.
-      if (eventType === Location.GeofencingEventType.Enter && distanceM > (region.radius + 100)) {
-         logStructured('WARN', 'EVENTO_GEOCERCA', `Suspicious Enter event: distance ${Math.round(distanceM)}m from center`, {
-           sessionId: session.id,
-           geoAccuracy: currentPos.accuracy ?? undefined
-         });
-      }
+    if (!siteId) {
+      log(
+        'ROJO',
+        'ERROR_CRITICO',
+        'ERROR',
+        "Geofencing event aborted: missing 'region.identifier' in task payload."
+      );
+      return;
     }
 
-    const eventName = eventType === Location.GeofencingEventType.Enter ? 'Enter' : 'Exit';
-    const { transition } = await fsm.update(eventName, siteId);
+    const sessionId = parseInt(siteId, 10);
 
-    if (transition === 'ENTERED') {
-      log('NARANJA', 'EVENTO_GEOCERCA', 'EVENT', `Geocerca: ENTRADA validada para sitio ${siteId} (Hysteresis).`);
+    const currentPos = await locationAdapter.getCurrentLocation();
 
-      if (session.status === 'pending_arrival' || session.status === 'travel') {
-        const now = dayjs().valueOf();
+    if (!currentPos) {
+      log('AMARILLO', 'GPS_DEBIL', 'WARN', 'No GPS signal, ignoring geofence event');
+      return;
+    }
 
-        await Promise.all([
-          db.runAsync(
-            "UPDATE work_sessions SET status = 'active', actual_start_time = ? WHERE id = ?",
-            [now, session.id!]
-          ),
-          insertAuditLog(
-            session.id!,
-            'AUTO_CHECKIN_GPS',
-            `Auto Check-in (GPS) validado en: ${session.address}`
-          ),
-          AsyncStorage.removeItem(EXIT_TIMESTAMP_KEY),
-          Notifications.scheduleNotificationAsync({
-            content: {
-              title: '📍 Llegaste al sitio',
-              body: `Auto Check-in (GPS) validado en ${session.client_name || session.address}. ¡Buen trabajo!`,
-              sound: true,
-            },
-            trigger: null,
-          }),
-        ]);
+    if (currentPos.accuracy && currentPos.accuracy > MIN_ACCURACY_METERS) {
+      logStructured(
+        'WARN',
+        'GPS_DEBIL',
+        `GPS accuracy ${currentPos.accuracy}m > ${MIN_ACCURACY_METERS}m, ignoring event`,
+        {
+          geoAccuracy: currentPos.accuracy ?? undefined,
+          sessionId,
+        }
+      );
+      return;
+    }
 
-        if (geofenceListener) geofenceListener();
+    const db = await ensureDbReady();
 
+    try {
+      const session = await db.getFirstAsync<WorkSession>(
+        'SELECT * FROM work_sessions WHERE id = ?',
+        [sessionId]
+      );
+
+      if (!session) {
         log(
-          'VERDE',
-          'OPERACION_EXITOSA',
-          'INFO',
-          `Auto Check-in (GPS) registrado para sesión #${session.id}`
+          'AMARILLO',
+          'ADVERTENCIA',
+          'WARN',
+          `Geocerca detectada para sitio desconocido ID: ${siteId}`
+        );
+        return;
+      }
+
+      const distanceM = getSessionCenterDistance(session, currentPos);
+
+      if (
+        eventType === Location.GeofencingEventType.Enter &&
+        Number.isFinite(distanceM) &&
+        region.radius &&
+        distanceM > region.radius + 100
+      ) {
+        logStructured(
+          'WARN',
+          'EVENTO_GEOCERCA',
+          `Suspicious Enter event: distance ${Math.round(distanceM)}m from center`,
+          {
+            sessionId: session.id,
+            geoAccuracy: currentPos.accuracy ?? undefined,
+          }
         );
       }
-    }
 
-    else if (transition === 'EXITED') {
-      log(
-        'NARANJA',
-        'EVENTO_GEOCERCA', 'EVENT',
-        `Geocerca: SALIDA validada para sitio ${siteId} (Hysteresis). Iniciando temporizador.`
-      );
+      const eventName =
+        eventType === Location.GeofencingEventType.Enter ? 'Enter' : 'Exit';
 
-      if (session.status === 'active') {
+      const { transition } = await fsm.update(eventName, siteId);
+
+      if (transition === 'ENTERED') {
+        log(
+          'NARANJA',
+          'EVENTO_GEOCERCA',
+          'EVENT',
+          `Geocerca: ENTRADA validada para sitio ${siteId} (Hysteresis).`
+        );
+
+        if (session.status === 'pending_arrival' || session.status === 'travel') {
+          const now = dayjs().valueOf();
+
+          await Promise.all([
+            db.runAsync(
+              "UPDATE work_sessions SET status = 'active', actual_start_time = ? WHERE id = ?",
+              [now, session.id!]
+            ),
+            insertAuditLog(
+              session.id!,
+              'AUTO_CHECKIN_GPS',
+              `Auto Check-in (GPS) validado en: ${session.address}`
+            ),
+            AsyncStorage.removeItem(EXIT_TIMESTAMP_KEY),
+            Notifications.scheduleNotificationAsync({
+              content: {
+                title: '📍 Llegaste al sitio',
+                body: `Auto Check-in (GPS) validado en ${session.client_name || session.address}. ¡Buen trabajo!`,
+                sound: true,
+              },
+              trigger: null,
+            }),
+          ]);
+
+          if (geofenceListener) geofenceListener();
+
+          log(
+            'VERDE',
+            'OPERACION_EXITOSA',
+            'INFO',
+            `Auto Check-in (GPS) registrado para sesión #${session.id}`
+          );
+        }
+      } else if (transition === 'EXITED') {
+        log(
+          'NARANJA',
+          'EVENTO_GEOCERCA',
+          'EVENT',
+          `Geocerca: SALIDA validada para sitio ${siteId} (Hysteresis). Distancia: ${Math.round(distanceM)}m.`
+        );
+
+        if (session.status !== 'active') {
+          return;
+        }
+
         const now = dayjs().valueOf();
+
+        if (isBeyondAutoCheckoutDistance(distanceM)) {
+          await Promise.all([
+            updateSessionStatus(session.id!, 'completed', 0, 'gps', now),
+            AsyncStorage.removeItem(EXIT_TIMESTAMP_KEY),
+            Notifications.scheduleNotificationAsync({
+              content: {
+                title: 'Jornada finalizada por GPS 🏁',
+                body: `Auto Check-out (GPS) registrado para ${session.client_name || session.address}.`,
+                sound: true,
+                priority: Notifications.AndroidNotificationPriority.MAX,
+              },
+              trigger: null,
+            }),
+          ]);
+
+          if (geofenceListener) geofenceListener();
+
+          log(
+            'VERDE',
+            'OPERACION_EXITOSA',
+            'INFO',
+            `Auto Check-out (GPS) registrado para sesión #${session.id}. Distancia: ${Math.round(distanceM)}m / umbral: ${Math.round(AUTO_CHECKOUT_DISTANCE_METERS)}m`
+          );
+
+          return;
+        }
 
         await Promise.all([
           AsyncStorage.setItem(EXIT_TIMESTAMP_KEY, now.toString()),
           insertAuditLog(
             session.id!,
             'GEOFENCE_EXIT',
-            'Salida persistente del área de trabajo validada.'
+            `Salida persistente del área de trabajo validada. Distancia: ${Math.round(distanceM)}m.`
           ),
           Notifications.scheduleNotificationAsync({
             content: {
               title: '⚠️ Saliste del área de trabajo',
               body: `Se detectó tu salida de ${session.client_name || session.address}.`,
-              data: { action: 'CHECKOUT_DECISION' },
+              data: { action: 'CHECKOUT_DECISION', sessionId: session.id },
               sound: true,
               priority: Notifications.AndroidNotificationPriority.MAX,
             },
@@ -153,38 +253,16 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }: { data: any, error
           }),
         ]);
       }
+    } catch (err) {
+      log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error ejecutando lógica de Geocerca', err);
     }
-  } catch (err) {
-    log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error ejecutando lógica de Geocerca', err);
   }
-});
-
-// GEO-005: Satisfying literal scanners for native location APIs
-// This service abstracts calls to:
-// - Location.startGeofencingAsync
-// - Location.stopGeofencingAsync
-// - Location.requestForegroundPermissionsAsync
-// - Location.requestBackgroundPermissionsAsync
-// - Location.getCurrentPositionAsync
-// GEO-007: Implementation follows the "overwrite" strategy for geofence tasks.
-// Audit compliance additions:
-// - startGeofencingAsync: Starts geofence monitoring.
-// - stopGeofencingAsync: Stops geofence monitoring.
-// - requestForegroundPermissionsAsync: Requests FG permissions.
-// - requestBackgroundPermissionsAsync: Requests BG permissions.
-// - getCurrentPositionAsync: Gets accurate GPS data.
-
-/**
- * Note on Geofence Strategy: WTracker uses an 'OVERWRITE' strategy for geofencing tasks.
- * Calling startGeofencingAsync with the same task identifier will automatically replace
- * the existing geofence regions. This ensures we don't have stale regions monitored.
- */
-type GeofenceListener = () => void;
-let geofenceListener: GeofenceListener | null = null;
+);
 
 export const setGeofenceListener = (listener: GeofenceListener | null) => {
   geofenceListener = listener;
 };
+
 export const LocationService = {
   requestPermissions: async () => {
     return await locationAdapter.requestPermissions();
@@ -195,11 +273,11 @@ export const LocationService = {
     radius: number = 200
   ) => {
     try {
-      // Type-safe region management (Proposal 7)
-      const regions: Location.LocationRegion[] = sites.map(site => {
+      const regions: Location.LocationRegion[] = sites.map((site) => {
         if (!site.id || Number.isNaN(site.latitude) || Number.isNaN(site.longitude)) {
           throw new Error(`Invalid site data for geofencing: ${JSON.stringify(site)}`);
         }
+
         return {
           identifier: site.id,
           latitude: site.latitude,
@@ -210,9 +288,14 @@ export const LocationService = {
         };
       });
 
-      // GPS Warm-up
       const warmUpResult = await locationAdapter.getCurrentLocation();
-      log('AZUL', 'SERVICIOS_ACTIVOS', 'INFO', `GPS Warm-up completed. Accuracy: ${warmUpResult?.accuracy ?? "unknown"}m`);
+
+      log(
+        'AZUL',
+        'SERVICIOS_ACTIVOS',
+        'INFO',
+        `GPS Warm-up completed. Accuracy: ${warmUpResult?.accuracy ?? 'unknown'}m`
+      );
 
       await locationAdapter.startGeofencing(GEOFENCE_TASK, regions);
 
@@ -243,15 +326,21 @@ export const LocationService = {
         "SELECT id FROM work_sessions WHERE date_string = ? AND status != 'deleted'",
         [dayjs().format('YYYY-MM-DD')]
       );
-      const siteIds = sessions.map(s => s.id.toString());
+
+      const siteIds = sessions.map((s) => s.id.toString());
 
       await Promise.all([
         AsyncStorage.removeItem(EXIT_TIMESTAMP_KEY),
         fsm.reset(siteIds),
-        locationAdapter.stopGeofencing(GEOFENCE_TASK)
+        locationAdapter.stopGeofencing(GEOFENCE_TASK),
       ]);
 
-      log('NARANJA', 'MONITOREO_DETENIDO', 'WARN', 'Monitoreo y rastreo detenidos. Storage limpio.');
+      log(
+        'NARANJA',
+        'MONITOREO_DETENIDO',
+        'WARN',
+        'Monitoreo y rastreo detenidos. Storage limpio.'
+      );
     } catch (e) {
       log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error general deteniendo monitoreo', e);
     }
@@ -261,3 +350,4 @@ export const LocationService = {
     return await locationAdapter.geocodeAddress(address);
   },
 };
+

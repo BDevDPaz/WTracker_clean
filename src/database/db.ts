@@ -13,7 +13,15 @@ let dbReady = false;
 
 export type CheckoutSource = 'manual' | 'gps' | 'failsafe' | 'system';
 
-const CHECKOUT_AUDIT_ACTIONS = {
+export type CompleteSessionOptions = {
+  source: CheckoutSource;
+  lunchMinutes?: number;
+  endTime?: number;
+};
+
+const AUDIT_ACTION_TYPES = {
+  MANUAL_UPDATE: 'MANUAL_UPDATE',
+  MANUAL_DELETE: 'MANUAL_DELETE',
   MANUAL_CHECKOUT: 'MANUAL_CHECKOUT',
   AUTO_CHECKOUT_GPS: 'AUTO_CHECKOUT_GPS',
   AUTO_CHECKOUT_FAILSAFE: 'AUTO_CHECKOUT_FAILSAFE',
@@ -25,14 +33,14 @@ const nowMs = (): number => dayjs().valueOf();
 const getCheckoutAuditAction = (source: CheckoutSource): string => {
   switch (source) {
     case 'gps':
-      return AUDIT_ACTIONS.AUTO_CHECKOUT_GPS;
+      return AUDIT_ACTION_TYPES.AUTO_CHECKOUT_GPS;
     case 'failsafe':
-      return CHECKOUT_AUDIT_ACTIONS.AUTO_CHECKOUT_FAILSAFE;
+      return AUDIT_ACTION_TYPES.AUTO_CHECKOUT_FAILSAFE;
     case 'system':
-      return CHECKOUT_AUDIT_ACTIONS.SYSTEM_CHECKOUT;
+      return AUDIT_ACTION_TYPES.SYSTEM_CHECKOUT;
     case 'manual':
     default:
-      return CHECKOUT_AUDIT_ACTIONS.MANUAL_CHECKOUT;
+      return AUDIT_ACTION_TYPES.MANUAL_CHECKOUT;
   }
 };
 
@@ -62,6 +70,7 @@ const getCheckoutDetails = (
 
 async function openDbOnce(): Promise<SQLite.SQLiteDatabase> {
   if (db) return db;
+
   db = await SQLite.openDatabaseAsync(DB_NAME);
   return db;
 }
@@ -99,6 +108,7 @@ async function runInTransaction<T>(
     } catch {
       // rollback secundario ignorado
     }
+
     throw error;
   }
 }
@@ -239,28 +249,54 @@ export const insertWorkSession = async (session: WorkSession) => {
   });
 };
 
-export const updateSessionEndTime = async (
+export const completeSession = async (
   id: number,
-  endTime: number,
-  source: CheckoutSource = 'gps'
+  options: CompleteSessionOptions
 ) => {
+  const endTime = options.endTime ?? nowMs();
+  const lunchMinutes = options.lunchMinutes ?? 0;
+
   await runInTransaction(async (database) => {
+    let lunchStart: number | null = null;
+    let lunchEnd: number | null = null;
+    let lunchTaken = 0;
+
+    if (lunchMinutes > 0) {
+      lunchTaken = 1;
+      lunchEnd = endTime;
+      lunchStart = endTime - lunchMinutes * 60000;
+    }
+
     await database.runAsync(
-      "UPDATE work_sessions SET end_time = ?, status = 'completed' WHERE id = ?",
-      [endTime, id]
+      `UPDATE work_sessions
+       SET end_time = ?, status = ?, lunch_taken = ?, lunch_start = ?, lunch_end = ?
+       WHERE id = ?`,
+      [endTime, 'completed', lunchTaken, lunchStart, lunchEnd, id]
     );
 
     await logAudit({
       session_id: id,
-      action_type: getCheckoutAuditAction(source),
-      details: getCheckoutDetails('completed', source),
+      action_type: getCheckoutAuditAction(options.source),
+      details: getCheckoutDetails('completed', options.source, lunchMinutes),
       timestamp: nowMs(),
     });
   });
 };
 
+export const updateSessionEndTime = async (
+  id: number,
+  endTime: number,
+  source: CheckoutSource = 'manual'
+) => {
+  return await completeSession(id, {
+    source,
+    endTime,
+  });
+};
+
 export const getSettings = async (): Promise<AppSettings | null> => {
   const database = await ensureDbReady();
+
   return await database.getFirstAsync<AppSettings>(
     'SELECT * FROM settings WHERE id = 1'
   );
@@ -287,7 +323,7 @@ export const saveSettings = async (settings: AppSettings) => {
 
     await logAudit({
       session_id: null,
-      action_type: AUDIT_ACTIONS.MANUAL,
+      action_type: AUDIT_ACTION_TYPES.MANUAL_UPDATE,
       details: 'Settings updated',
       timestamp: nowMs(),
     });
@@ -305,7 +341,7 @@ export const deleteWorkSession = async (id: number) => {
 
     await logAudit({
       session_id: id,
-      action_type: AUDIT_ACTIONS.MANUAL,
+      action_type: AUDIT_ACTION_TYPES.MANUAL_DELETE,
       details: 'Work session soft-deleted',
       timestamp: nowMs(),
     });
@@ -332,7 +368,7 @@ export const updateWorkSessionManual = async (
 
     await logAudit({
       session_id: id,
-      action_type: AUDIT_ACTIONS.MANUAL,
+      action_type: AUDIT_ACTION_TYPES.MANUAL_UPDATE,
       details: `Manual session update: start=${startTime}, end=${endTime}, note=${note}`,
       timestamp: nowMs(),
     });
@@ -361,7 +397,7 @@ export const checkSessionOverlap = async (
 };
 
 export const insertAuditLog = async (
-  sessionId: number,
+  sessionId: number | null,
   action: string,
   details: string
 ) => {
@@ -408,21 +444,21 @@ export const getWeeklyStats = async (
   return getTotalDurationMs(mondayTs, nowTs);
 };
 
-export const getAllAsync = async <T>(
+export async function getAllAsync<T>(
   query: string,
   params: any[] = []
-): Promise<T[]> => {
+): Promise<T[]> {
   const database = await ensureDbReady();
   return await database.getAllAsync<T>(query, params);
-};
+}
 
-export const getFirstAsync = async <T>(
+export async function getFirstAsync<T>(
   query: string,
   params: any[] = []
-): Promise<T | null> => {
+): Promise<T | null> {
   const database = await ensureDbReady();
   return await database.getFirstAsync<T>(query, params);
-};
+}
 
 export const createSession = insertWorkSession;
 export const closeSession = updateSessionEndTime;
@@ -453,44 +489,29 @@ export const updateSessionStatus = async (
   id: number,
   status: SessionStatus,
   lunchMinutes: number = 0,
-  checkoutSource: CheckoutSource = 'manual'
+  checkoutSource: CheckoutSource = 'manual',
+  explicitEndTime?: number
 ) => {
-  const endTime = nowMs();
+  if (status === 'completed') {
+    return await completeSession(id, {
+      source: checkoutSource,
+      lunchMinutes,
+      endTime: explicitEndTime,
+    });
+  }
 
   await runInTransaction(async (database) => {
-    if (status === 'completed') {
-      let lunchStart: number | null = null;
-      let lunchEnd: number | null = null;
-      let lunchTaken = 0;
-
-      if (lunchMinutes > 0) {
-        lunchTaken = 1;
-        lunchEnd = endTime;
-        lunchStart = endTime - lunchMinutes * 60000;
-      }
-
-      await database.runAsync(
-        `UPDATE work_sessions
-         SET end_time = ?, status = ?, lunch_taken = ?, lunch_start = ?, lunch_end = ?
-         WHERE id = ?`,
-        [endTime, status, lunchTaken, lunchStart, lunchEnd, id]
-      );
-    } else {
-      await database.runAsync(
-        `UPDATE work_sessions
-         SET status = ?
-         WHERE id = ?`,
-        [status, id]
-      );
-    }
+    await database.runAsync(
+      `UPDATE work_sessions
+       SET status = ?
+       WHERE id = ?`,
+      [status, id]
+    );
 
     await logAudit({
       session_id: id,
-      action_type:
-        status === 'completed'
-          ? getCheckoutAuditAction(checkoutSource)
-          : AUDIT_ACTIONS.MANUAL,
-      details: getCheckoutDetails(status, checkoutSource, lunchMinutes),
+      action_type: AUDIT_ACTION_TYPES.MANUAL_UPDATE,
+      details: `Estado de la sesión actualizado a ${status}`,
       timestamp: nowMs(),
     });
   });

@@ -3,8 +3,9 @@ import * as BackgroundTask from 'expo-background-task';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import AsyncLock from 'async-lock';
+
 import { log, logStructured } from '../utils/logger';
-import { ensureDbReady, insertAuditLog, updateSessionEndTime } from '../database/db';
+import { ensureDbReady, updateSessionEndTime } from '../database/db';
 import { WorkSession } from '../types';
 import { generateWeeklyReport, checkAndDeliverPendingReports } from './ReportGenerator';
 import { EXIT_TIMESTAMP_KEY } from './LocationManager';
@@ -13,7 +14,9 @@ import { engine } from '../engine/workTrackerEngine';
 
 const TASK_NAME = 'APP_BACKGROUND_SERVICES';
 const REPORT_STORAGE_KEY = 'LAST_REPORT_WEEK_ID';
+
 export const FAILSAFE_THRESHOLD_MS = 45 * 60 * 1000;
+
 const bgLock = new AsyncLock();
 
 export const runFailsafeCheck = async () => {
@@ -23,49 +26,82 @@ export const runFailsafeCheck = async () => {
   try {
     const lastExitStr = await AsyncStorage.getItem(EXIT_TIMESTAMP_KEY);
 
-    if (lastExitStr) {
-      const exitTime = parseInt(lastExitStr, 10);
-
-      if (Number.isNaN(exitTime) || exitTime > now) {
-        await AsyncStorage.removeItem(EXIT_TIMESTAMP_KEY);
-      } else {
-        const timeDiff = now - exitTime;
-
-        if (timeDiff > FAILSAFE_THRESHOLD_MS) {
-          const session = await db.getFirstAsync<WorkSession>(
-            "SELECT * FROM work_sessions WHERE status = 'active' ORDER BY actual_start_time DESC LIMIT 1"
-          );
-
-          if (session?.id) {
-            log(
-              'AMARILLO',
-              'ADVERTENCIA',
-              'WARN',
-              `Failsafe: Auto Check-out retroactivo para sesión #${session.id} (Salida detectada hace ${Math.round(timeDiff / 60000)} min)`
-            );
-
-            await updateSessionEndTime(session.id, exitTime, 'failsafe');
-
-            await Promise.all([
-              AsyncStorage.removeItem(EXIT_TIMESTAMP_KEY),
-              Notifications.scheduleNotificationAsync({
-                content: {
-                  title: 'Jornada Finalizada 🏁',
-                  body: `Tu sesión en ${session.client_name || 'el sitio'} se cerró automáticamente por inactividad.`,
-                  sound: true,
-                },
-                trigger: null,
-              }),
-            ]);
-
-            engine.dispatch({ type: 'BACKGROUND_SESSION_TIMEOUT' });
-            return true;
-          }
-
-          await AsyncStorage.removeItem(EXIT_TIMESTAMP_KEY);
-        }
-      }
+    if (!lastExitStr) {
+      log('BLANCO', 'SIN_CAMBIOS', 'DEBUG', 'Failsafe: sin timestamp de salida pendiente.');
+      return false;
     }
+
+    const exitTime = parseInt(lastExitStr, 10);
+
+    if (Number.isNaN(exitTime) || exitTime > now) {
+      log(
+        'AMARILLO',
+        'ADVERTENCIA',
+        'WARN',
+        `Failsafe: timestamp de salida inválido (${lastExitStr}); limpiando storage.`
+      );
+      await AsyncStorage.removeItem(EXIT_TIMESTAMP_KEY);
+      return false;
+    }
+
+    const timeDiff = now - exitTime;
+
+    if (timeDiff <= FAILSAFE_THRESHOLD_MS) {
+      log(
+        'BLANCO',
+        'SIN_CAMBIOS',
+        'DEBUG',
+        `Failsafe: umbral no alcanzado. Fuera del área hace ${Math.round(timeDiff / 60000)} min.`
+      );
+      return false;
+    }
+
+    const session = await db.getFirstAsync<WorkSession>(
+      "SELECT * FROM work_sessions WHERE status = 'active' ORDER BY actual_start_time DESC LIMIT 1"
+    );
+
+    if (!session?.id) {
+      log(
+        'AMARILLO',
+        'ADVERTENCIA',
+        'WARN',
+        'Failsafe: salida pendiente pero no existe sesión active; limpiando storage.'
+      );
+      await AsyncStorage.removeItem(EXIT_TIMESTAMP_KEY);
+      return false;
+    }
+
+    log(
+      'AMARILLO',
+      'ADVERTENCIA',
+      'WARN',
+      `Failsafe: Auto Check-out retroactivo para sesión #${session.id} (Salida detectada hace ${Math.round(timeDiff / 60000)} min)`
+    );
+
+    await updateSessionEndTime(session.id, exitTime, 'failsafe');
+
+    await Promise.all([
+      AsyncStorage.removeItem(EXIT_TIMESTAMP_KEY),
+      Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Jornada Finalizada 🏁',
+          body: `Tu sesión en ${session.client_name || 'el sitio'} se cerró automáticamente por inactividad.`,
+          sound: true,
+        },
+        trigger: null,
+      }),
+    ]);
+
+    engine.dispatch({ type: 'SYNC_ACTIVE_SESSION' });
+
+    log(
+      'VERDE',
+      'OPERACION_EXITOSA',
+      'INFO',
+      `AUTO_CHECKOUT_FAILSAFE registrado para sesión #${session.id}`
+    );
+
+    return true;
   } catch (failsafeError) {
     log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error en Failsafe', failsafeError);
   }
@@ -76,37 +112,79 @@ export const runFailsafeCheck = async () => {
 TaskManager.defineTask(TASK_NAME, async () => {
   return await bgLock.acquire('bg-database-work', async () => {
     logStructured('DEBUG', 'ESTADO_SISTEMA', 'MUTEX_LOCK: bg-database-work');
+
     try {
       log('BLANCO', 'BACKGROUND_TASK', 'DEBUG', 'Tarea iniciada por el sistema...');
+
       let newDataProcessed = false;
+
       try {
         await checkAndDeliverPendingReports();
+
         const failsafeProcessed = await runFailsafeCheck();
-        if (failsafeProcessed) newDataProcessed = true;
+
+        if (failsafeProcessed) {
+          newDataProcessed = true;
+        }
+
         try {
           const currentDate = dayjs();
           const day = currentDate.day();
-          const isReportWindow = (day === 0 && currentDate.hour() >= 20) || day === 1 || day === 2;
+          const isReportWindow =
+            (day === 0 && currentDate.hour() >= 20) || day === 1 || day === 2;
+
           if (isReportWindow) {
-            const targetWeek = day === 0 ? currentDate : currentDate.subtract(1, 'week');
+            const targetWeek =
+              day === 0 ? currentDate : currentDate.subtract(1, 'week');
+
             const startTs = targetWeek.startOf('isoWeek').valueOf();
             const endTs = targetWeek.endOf('isoWeek').valueOf();
             const currentWeekId = targetWeek.startOf('isoWeek').format('YYYY-MM-DD');
             const lastReported = await AsyncStorage.getItem(REPORT_STORAGE_KEY);
+
             if (lastReported !== currentWeekId) {
-              const pdfUri = await generateWeeklyReport(false, { start: startTs, end: endTs });
+              const pdfUri = await generateWeeklyReport(false, {
+                start: startTs,
+                end: endTs,
+              });
+
               if (pdfUri) {
-                await Notifications.scheduleNotificationAsync({ content: { title: '📄 Reporte Semanal Listo', body: 'Toca para revisar y enviar tu nómina.', data: { action: 'GENERATE_REPORT_PROMPT' }, sound: true }, trigger: null });
+                await Notifications.scheduleNotificationAsync({
+                  content: {
+                    title: '📄 Reporte Semanal Listo',
+                    body: 'Toca para revisar y enviar tu nómina.',
+                    data: { action: 'GENERATE_REPORT_PROMPT' },
+                    sound: true,
+                  },
+                  trigger: null,
+                });
+
                 await AsyncStorage.setItem(REPORT_STORAGE_KEY, currentWeekId);
                 newDataProcessed = true;
               }
             }
           }
-        } catch (reportError) { log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error en Reporte', reportError); }
-        if (newDataProcessed) { log('BLANCO', 'BACKGROUND_TASK', 'INFO', 'Tarea completada con trabajo útil.'); }
-        else { log('BLANCO', 'SIN_CAMBIOS', 'DEBUG', 'Tarea completada sin cambios.'); }
+        } catch (reportError) {
+          log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error en Reporte', reportError);
+        }
+
+        if (newDataProcessed) {
+          log('BLANCO', 'BACKGROUND_TASK', 'INFO', 'Tarea completada con trabajo útil.');
+        } else {
+          log('BLANCO', 'SIN_CAMBIOS', 'DEBUG', 'Tarea completada sin cambios.');
+        }
+
         return BackgroundTask.BackgroundTaskResult.Success;
-      } catch (criticalError) { log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error Crítico General en BackgroundTasks', criticalError); return BackgroundTask.BackgroundTaskResult.Failed; }
+      } catch (criticalError) {
+        log(
+          'ROJO',
+          'ERROR_CRITICO',
+          'ERROR',
+          'Error Crítico General en BackgroundTasks',
+          criticalError
+        );
+        return BackgroundTask.BackgroundTaskResult.Failed;
+      }
     } finally {
       logStructured('DEBUG', 'ESTADO_SISTEMA', 'MUTEX_UNLOCK: bg-database-work');
     }
@@ -117,22 +195,78 @@ export const BackgroundTasks = {
   register: async () => {
     try {
       const status = await BackgroundTask.getStatusAsync();
-      if (status === BackgroundTask.BackgroundTaskStatus.Restricted) { log('AMARILLO', 'ADVERTENCIA', 'WARN', 'Background Task restringido por el SO.'); return; }
+
+      if (status === BackgroundTask.BackgroundTaskStatus.Restricted) {
+        log(
+          'AMARILLO',
+          'ADVERTENCIA',
+          'WARN',
+          'Background Task restringido por el SO.'
+        );
+        return;
+      }
+
       const isRegistered = await TaskManager.isTaskRegisteredAsync(TASK_NAME);
-      if (!isRegistered) { await BackgroundTask.registerTaskAsync(TASK_NAME, { minimumInterval: 15 }); log('VERDE', 'SERVICIOS_ACTIVOS', 'INFO', 'Servicios de fondo (Failsafe + Reportes) registrados.'); }
-      else { log('VERDE', 'SERVICIOS_ACTIVOS', 'INFO', 'Servicios de fondo ya estaban registrados.'); }
-    } catch (e) { log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error registrando background tasks', e); }
+
+      if (!isRegistered) {
+        await BackgroundTask.registerTaskAsync(TASK_NAME, {
+          minimumInterval: 15,
+        });
+        log(
+          'VERDE',
+          'SERVICIOS_ACTIVOS',
+          'INFO',
+          'Servicios de fondo (Failsafe + Reportes) registrados.'
+        );
+      } else {
+        log(
+          'VERDE',
+          'SERVICIOS_ACTIVOS',
+          'INFO',
+          'Servicios de fondo ya estaban registrados.'
+        );
+      }
+    } catch (e) {
+      log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error registrando background tasks', e);
+    }
   },
+
   unregister: async () => {
     try {
       const isRegistered = await TaskManager.isTaskRegisteredAsync(TASK_NAME);
-      if (isRegistered) { await BackgroundTask.unregisterTaskAsync(TASK_NAME); }
+
+      if (isRegistered) {
+        await BackgroundTask.unregisterTaskAsync(TASK_NAME);
+      }
+
       log('ROJO', 'MONITOREO_DETENIDO', 'ERROR', 'Servicios de fondo detenidos.');
-    } catch (e) { log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error al desregistrar tarea', e); }
+    } catch (e) {
+      log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error al desregistrar tarea', e);
+    }
   },
+
   triggerForTesting: async () => {
-    if (!__DEV__) { log('AMARILLO', 'ADVERTENCIA', 'WARN', 'triggerForTesting solo está disponible en builds de desarrollo.'); return; }
-    try { await BackgroundTask.triggerTaskWorkerForTestingAsync(); log('BLANCO', 'BACKGROUND_TASK', 'DEBUG', 'Background task disparado manualmente para pruebas.'); }
-    catch (e) { log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error disparando background task de prueba', e); }
+    if (!__DEV__) {
+      log(
+        'AMARILLO',
+        'ADVERTENCIA',
+        'WARN',
+        'triggerForTesting solo está disponible en builds de desarrollo.'
+      );
+      return;
+    }
+
+    try {
+      await BackgroundTask.triggerTaskWorkerForTestingAsync();
+      log(
+        'BLANCO',
+        'BACKGROUND_TASK',
+        'DEBUG',
+        'Background task disparado manualmente para pruebas.'
+      );
+    } catch (e) {
+      log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error disparando background task de prueba', e);
+    }
   },
 };
+
