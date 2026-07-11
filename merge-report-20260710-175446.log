@@ -15,3 +15,13 @@ Se encontraron cambios fuera de un merge. Se agregaran y confirmaran automaticam
  M merge-report-20260710-174800.log
  M merge_wtracker_branches.sh
 ?? merge-report-20260710-175446.log
+[integration/wtracker-v2.2-merge 2a64e75] Automated cleanup before continuing integration
+ 3 files changed, 74 insertions(+), 53 deletions(-)
+ create mode 100644 merge-report-20260710-175446.log
+[0;32mOK:[0m cambios residuales confirmados automaticamente.
+
+[0;34m============================================================[0m
+[0;34mCambios residuales detectados[0m
+[0;34m============================================================[0m
+Se encontraron cambios fuera de un merge. Se agregaran y confirmaran automaticamente.
+ M merge-report-20260710-175446.log
