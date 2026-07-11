@@ -45,6 +45,35 @@ export interface AuditLogEntry {
   timestamp: number;
 }
 
+// ✅ [P0-CRITICAL] Formato seguro de metadatos con manejo de Errores
+const formatMetadata = (meta?: any): string | undefined => {
+  if (!meta) return undefined;
+  
+  // Caso 1: Error objects - extraer propiedades manualmente (JSON.stringify no funciona)
+  if (meta instanceof Error) {
+    return JSON.stringify({
+      message: meta.message,
+      name: meta.name,
+      code: (meta as any).code,
+      // Stack truncado a 500 chars para no saturar BD
+      stack: meta.stack ? meta.stack.substring(0, 500) : undefined
+    });
+  }
+  
+  // Caso 2: Objetos normales - truncar si exceden 1KB
+  try {
+    const stringified = JSON.stringify(meta);
+    if (stringified.length > 1000) {
+      return `${stringified.substring(0, 1000)}...[TRUNCATED]`;
+    }
+    return stringified;
+  } catch (e) {
+    // Fallback si JSON.stringify falla (circular references, etc)
+    return `[Circular or Complex Object]`;
+  }
+};
+
+// Vincula la DB al logger y procesa los pendientes
 export const setLoggerDB = (db: SQLite.SQLiteDatabase) => {
   dbInstance = db;
   void flushQueues();
@@ -161,9 +190,15 @@ export const log = (
   categoria: LogCategory,
   severidad: LogSeverity,
   mensaje: string,
-  metadata?: unknown
-): void => {
-  const now = dayjs();
+  metadata?: any
+) => {
+  const now = new Date();
+  const timestamp = now.getTime();
+  const timestamp_str = now.toISOString();
+
+  // ✅ Usar formatMetadata en lugar de JSON.stringify directo
+  const formattedMeta = formatMetadata(metadata);
+
   const entry: SystemLogEntry = {
     timestamp: now.valueOf(),
     timestamp_str: now.format('YYYY-MM-DDTHH:mm:ss.SSSZ'),
@@ -171,7 +206,7 @@ export const log = (
     categoria,
     severidad,
     mensaje,
-    metadata: safeSerializeMetadata(metadata),
+    metadata: formattedMeta
   };
 
   const icon = getIconByColor(color);
@@ -181,6 +216,19 @@ export const log = (
   else if (severidad === 'WARN') _output.warn(consoleMsg, metadata ?? '');
   else _output.info(consoleMsg, metadata ?? '');
 
+  // ✅ CORRECCIÓN: Evita la Pantalla Roja de Expo para eventos de auditoría (como borrar un registro).
+  // Solo lanza un console.error si realmente estamos pasando un objeto de Error real al metadata.
+  if (severidad === 'ERROR' && metadata instanceof Error) {
+    console.error(consoleMsg, metadata);
+  } else if (severidad === 'WARN') {
+    console.warn(consoleMsg, formattedMeta ? JSON.parse(formattedMeta) : '');
+  } else {
+    // Usamos console.log para todo lo demás, preservando tus colores e iconos, 
+    // pero sin interrumpir el uso de la aplicación.
+    console.log(consoleMsg, formattedMeta ? JSON.parse(formattedMeta) : '');
+  }
+
+  // Guardar en la DB o mandar a la cola si la DB no está lista
   if (dbInstance) {
     dbInstance.runAsync(
       `INSERT INTO system_logs (timestamp, timestamp_str, color, categoria, severidad, mensaje, metadata) VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -192,6 +240,4 @@ export const log = (
   } else {
     logQueue.push(entry);
   }
-
-  emitFeedbackFromLog(severidad, categoria, mensaje);
 };
