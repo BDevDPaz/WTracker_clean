@@ -1,16 +1,21 @@
 {
   "expo": {
-    "name": "LEDTracker",
+    "name": "W-Tracker",
     "slug": "LEDTracker",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "ledtracker",
-    "userInterfaceStyle": "automatic",
+    "scheme": "wtracker",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/images/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.bdevdpaz.ledtracker",
+      "bundleIdentifier": "com.bdevdpaz.wtracker",
       "infoPlist": {
         "UIBackgroundModes": [
           "location",
@@ -20,14 +25,12 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#000000"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.bdevdpaz.ledtracker",
+      "package": "com.bdevdpaz.wtracker",
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
@@ -36,7 +39,12 @@
         "FOREGROUND_SERVICE_LOCATION",
         "RECEIVE_BOOT_COMPLETED",
         "WAKE_LOCK",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
       ]
     },
     "web": {
@@ -50,13 +58,17 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "LEDTracker necesita tu ubicación en segundo plano para registrar automáticamente tu entrada y salida del trabajo."
+          "locationAlwaysAndWhenInUsePermission": "W-Tracker needs your location in the background to automatically record your entry and exit from work. / W-Tracker necesita tu ubicación en segundo plano para registrar automáticamente tu entrada y salida del trabajo.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       "expo-task-manager",
-      "expo-background-fetch",
       "expo-notifications",
-      "expo-mail-composer"
+      "expo-mail-composer",
+      "expo-font",
+      "expo-web-browser",
+      "expo-background-task"
     ],
     "experiments": {
       "typedRoutes": true,

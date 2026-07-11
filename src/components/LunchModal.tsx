@@ -1,52 +1,74 @@
-import React from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+// --- src/components/LunchModal.tsx ---
+import React, { useState } from 'react';
+import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLanguage } from '../context/LanguageContext';
+import { GlassModalWrapper, LuxuryButton, LuxuryInput } from './LuxuryUI';
+import { COLORS } from '../constants/theme';
+import { log } from '../utils/logger';
 
 interface Props {
-  visible: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
+    visible: boolean;
+    onConfirm: (minutes: number) => void;
+    onCancel: () => void;
 }
 
-// ✅ CORRECTO: Exportación con nombre
 export function LunchModal({ visible, onConfirm, onCancel }: Props) {
   const { t } = useLanguage();
+  const [durationStr, setDurationStr] = useState('60');
+
+  const handleConfirm = () => {
+      const minutes = parseInt(durationStr) || 0;
+      log('NARANJA', 'MODOS_ESPECIALES', 'EVENT', `Descanso de almuerzo confirmado: ${minutes} min`);
+      onConfirm(minutes);
+  };
+
+  const handleNoLunch = () => {
+      log('BLANCO', 'SIN_CAMBIOS', 'INFO', 'Jornada a punto de finalizar. Usuario indicó que no tomó almuerzo.');
+      onConfirm(0);
+  };
+
+  const handleCancel = () => {
+      log('BLANCO', 'SIN_CAMBIOS', 'DEBUG', 'Lunch Modal cancelado por el usuario.');
+      onCancel();
+  };
 
   return (
-    <Modal visible={visible} animationType="fade" transparent>
-      <View style={styles.overlay}>
-        <View style={styles.modalContainer}>
-          <Ionicons name="fast-food-outline" size={50} color="#FFD700" style={{marginBottom:15}} />
-          
-          <Text style={styles.title}>{t.lunch_title || "Hora de Almuerzo"}</Text>
-          <Text style={styles.msg}>{t.lunch_msg || "¿Vas a tomar tu descanso hoy?"}</Text>
-          <Text style={styles.subMsg}>{t.lunch_sub || "(Se descontará 1 hora)"}</Text>
-
-          <View style={styles.row}>
-            <TouchableOpacity style={styles.btnNo} onPress={onCancel}>
-              <Text style={styles.btnTextNo}>{t.lunch_no || "NO"}</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.btnYes} onPress={onConfirm}>
-              <Text style={styles.btnTextYes}>{t.lunch_yes || "SÍ, DESCONTAR"}</Text>
-            </TouchableOpacity>
-          </View>
+    <GlassModalWrapper visible={visible}>
+      <View style={{alignItems: 'center', marginBottom: 20}}>
+        <View style={styles.iconHeader}>
+          <Ionicons name="restaurant-outline" size={40} color={COLORS.gold} />
         </View>
+        <Text style={styles.title}>{t.lunch_title || "Registro de Almuerzo"}</Text>
+        <Text style={styles.msg}>{t.lunch_subtitle || "Deducción automática de tiempo"}</Text>
+
+        <LuxuryInput
+          containerStyle={styles.inputContainer}
+          style={styles.input}
+          value={durationStr}
+          onChangeText={setDurationStr}
+          keyboardType="number-pad"
+          maxLength={3}
+          selectTextOnFocus
+          textAlign="center"
+        />
+        <Text style={styles.suffix}>minutos</Text>
       </View>
-    </Modal>
+
+      <View style={{ gap: 8 }}>
+        <LuxuryButton text={t.btn_save || "CONFIRMAR"} onPress={handleConfirm} variant="success" />
+        <LuxuryButton text={t.lunch_no || "NO TOMÉ ALMUERZO"} onPress={handleNoLunch} variant="secondary" />
+        <LuxuryButton text={t.btn_cancel || "CANCELAR"} onPress={handleCancel} variant="outline" />
+      </View>
+    </GlassModalWrapper>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', padding: 30 },
-  modalContainer: { backgroundColor: '#1E1E1E', borderRadius: 16, padding: 25, alignItems:'center' },
-  title: { color: '#FFF', fontSize: 22, fontWeight: 'bold', marginBottom: 10 },
-  msg: { color: '#DDD', fontSize: 16, textAlign:'center' },
-  subMsg: { color: '#AAA', fontSize: 12, marginBottom: 25, fontStyle:'italic' },
-  row: { flexDirection:'row', gap: 15, width:'100%' },
-  btnNo: { flex:1, backgroundColor:'#333', padding: 15, borderRadius: 10, alignItems:'center' },
-  btnYes: { flex:1, backgroundColor:'#2E7D32', padding: 15, borderRadius: 10, alignItems:'center' },
-  btnTextNo: { color: '#FFF' },
-  btnTextYes: { color: '#FFF', fontWeight:'bold' }
+  iconHeader: { marginBottom: 16, padding: 10, backgroundColor: 'rgba(212,175,55,0.1)', borderRadius: 50 },
+  title: { fontFamily: 'Montserrat_700Bold', color: '#FFF', fontSize: 20, marginBottom: 5, textAlign: 'center' },
+  msg: { fontFamily: 'Montserrat_400Regular', color: '#AAA', fontSize: 12, marginBottom: 24, textAlign: 'center' },
+  inputContainer: { width: 120, alignSelf: 'center' },
+  input: { fontSize: 24, fontFamily: 'Montserrat_700Bold', color: COLORS.gold, textAlign: 'center' },
+  suffix: { color: COLORS.textSecondary, fontSize: 10, fontFamily: 'Montserrat_600SemiBold', textTransform: 'uppercase', letterSpacing: 1, marginTop: -10, marginBottom: 10 }
 });
