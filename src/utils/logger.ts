@@ -53,11 +53,37 @@ const flushLogQueue = async () => {
   const toProcess = logQueue.splice(0, logQueue.length).filter(Boolean);
   if (toProcess.length === 0) return;
 
-  await dbInstance.withTransactionAsync(async () => {
-    for (const entry of toProcess) {
-      await saveSystemLogToDb(entry);
+  const CHUNK_SIZE = 50; // SQLite limit ~999 vars, 7 vars per log = max ~142
+  for (let i = 0; i < toProcess.length; i += CHUNK_SIZE) {
+    const chunk = toProcess.slice(i, i + CHUNK_SIZE);
+    const placeholders = chunk.map(() => '(?, ?, ?, ?, ?, ?, ?)').join(', ');
+    const values = chunk.flatMap((entry) => [
+      entry.timestamp,
+      entry.timestamp_str,
+      entry.color,
+      entry.categoria,
+      entry.severidad,
+      entry.mensaje,
+      entry.metadata ?? null,
+    ]);
+
+    try {
+      await dbInstance.runAsync(
+        `INSERT INTO system_logs (
+          timestamp,
+          timestamp_str,
+          color,
+          categoria,
+          severidad,
+          mensaje,
+          metadata
+        ) VALUES ${placeholders}`,
+        values as any
+      );
+    } catch (e) {
+      _output.error('❌ Fallo crítico al guardar chunk de system logs:', e);
     }
-  });
+  }
 };
 
 const flushAuditQueue = async () => {
@@ -66,11 +92,31 @@ const flushAuditQueue = async () => {
   const toProcess = auditQueue.splice(0, auditQueue.length).filter(Boolean);
   if (toProcess.length === 0) return;
 
-  await dbInstance.withTransactionAsync(async () => {
-    for (const entry of toProcess) {
-      await saveAuditToDb(entry);
+  const CHUNK_SIZE = 100; // SQLite limit ~999 vars, 4 vars per log = max ~249
+  for (let i = 0; i < toProcess.length; i += CHUNK_SIZE) {
+    const chunk = toProcess.slice(i, i + CHUNK_SIZE);
+    const placeholders = chunk.map(() => '(?, ?, ?, ?)').join(', ');
+    const values = chunk.flatMap((entry) => [
+      entry.session_id,
+      entry.action_type,
+      entry.details,
+      entry.timestamp,
+    ]);
+
+    try {
+      await dbInstance.runAsync(
+        `INSERT INTO audit_logs (
+          session_id,
+          action_type,
+          details,
+          timestamp
+        ) VALUES ${placeholders}`,
+        values as any
+      );
+    } catch (e) {
+      _output.error('❌ Fallo crítico al guardar chunk de audit logs:', e);
     }
-  });
+  }
 };
 
 const saveSystemLogToDb = async (entry: SystemLogEntry) => {
