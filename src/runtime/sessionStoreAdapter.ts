@@ -6,8 +6,9 @@ import {
   getHistory,
   saveSettings,
   deleteSession,
-  insertAuditLog
+  insertAuditLog,
 } from '../database/db';
+import type { CheckoutSource } from '../database/db';
 import { WorkSession, AppSettings } from '../types';
 
 export const sessionStoreAdapter = {
@@ -23,9 +24,14 @@ export const sessionStoreAdapter = {
     return await saveSession(session);
   },
 
-  updateSessionStatus: async (id: number, status: string, lunchMinutes: number = 0) => {
+  updateSessionStatus: async (
+    id: number,
+    status: string,
+    lunchMinutes: number = 0,
+    checkoutSource: CheckoutSource = 'manual'
+  ) => {
     // Note: status is strictly typed in updateSessionStatus, might need cast if engine uses same strings
-    return await updateSessionStatus(id, status as any, lunchMinutes);
+    return await updateSessionStatus(id, status as any, lunchMinutes, checkoutSource);
   },
 
   getHistory: async (): Promise<WorkSession[]> => {
@@ -42,5 +48,6 @@ export const sessionStoreAdapter = {
 
   logAudit: async (sessionId: number, action: string, details: string) => {
     return await insertAuditLog(sessionId, action, details);
-  }
+  },
 };
+

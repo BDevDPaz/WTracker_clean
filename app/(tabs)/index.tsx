@@ -130,11 +130,15 @@ function HomeScreenComponent() {
   };
 
   const completeSession = (lunchMin: number) => {
-    setShowLunchModal(false);
-    router.setParams({ showCheckoutPrompt: undefined });
-    engine.dispatch({ type: 'STOP_SESSION_REQUEST', lunchMinutes: lunchMin });
-    showToast(t.toast_shift_ended || 'Jornada finalizada', 'success');
-  };
+  setShowLunchModal(false);
+  router.setParams({ showCheckoutPrompt: undefined });
+  engine.dispatch({
+    type: 'STOP_SESSION_REQUEST',
+    lunchMinutes: lunchMin,
+    source: 'manual',
+  });
+  showToast(t.toast_shift_ended || 'Jornada finalizada', 'success');
+};
 
   const handleEasterEggTap = () => {
     const nextTap = tapCount + 1;

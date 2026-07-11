@@ -5,7 +5,7 @@ import {
   saveSession,
   updateSessionStatus,
   getAllAsync,
-  saveSettings
+  saveSettings,
 } from '../../database/db';
 import { LocationService } from '../../services/LocationManager';
 import dayjs from '../../utils/dayjsSetup';
@@ -29,11 +29,12 @@ export async function workTrackerEffects(
         );
 
         if (pendingForInit.length > 0) {
-          const initSites = pendingForInit.map(s => ({
+          const initSites = pendingForInit.map((s) => ({
             id: s.id.toString(),
             latitude: s.latitude,
             longitude: s.longitude,
           }));
+
           const initRadius = settings?.tolerance_radius || 200;
           await LocationService.startMonitoringArrival(initSites, initRadius);
         }
@@ -49,11 +50,11 @@ export async function workTrackerEffects(
       }
 
       case 'START_SESSION_REQUEST': {
-                const sanitizedAddress = securityAdapter.sanitizeInput(event.address);
+        const sanitizedAddress = securityAdapter.sanitizeInput(event.address);
         const sanitizedClient = event.client ? securityAdapter.sanitizeInput(event.client) : undefined;
         const sanitizedNotes = event.notes ? securityAdapter.sanitizeInput(event.notes) : undefined;
-
         const coords = await LocationService.getCoordsFromAddress(sanitizedAddress);
+
         if (!coords) {
           dispatch({ type: 'ERROR_OCCURRED', error: 'Address not found' });
           return;
@@ -84,7 +85,7 @@ export async function workTrackerEffects(
           [dayjs().format('YYYY-MM-DD')]
         );
 
-        const sites = pendingSessions.map(s => ({
+        const sites = pendingSessions.map((s) => ({
           id: s.id.toString(),
           latitude: s.latitude,
           longitude: s.longitude,
@@ -99,24 +100,32 @@ export async function workTrackerEffects(
 
       case 'STOP_SESSION_REQUEST':
         if (state.activeSession?.id) {
-          await updateSessionStatus(state.activeSession.id, 'completed', event.lunchMinutes);
+          await updateSessionStatus(
+            state.activeSession.id,
+            'completed',
+            event.lunchMinutes,
+            'manual'
+          );
+
           // Only stop monitoring if no more active/pending sessions exist for today
           const pendingSessions = await getAllAsync<any>(
-            "SELECT id FROM work_sessions WHERE status = 'pending_arrival' AND date_string = ?",
+            "SELECT id, latitude, longitude FROM work_sessions WHERE status = 'pending_arrival' AND date_string = ?",
             [dayjs().format('YYYY-MM-DD')]
           );
 
           if (pendingSessions.length === 0) {
             await LocationService.stopMonitoring();
           } else {
-             // If there are still pending sessions, just re-sync monitoring to exclude the current one
-             const initSites = pendingSessions.map(s => ({
+            // If there are still pending sessions, just re-sync monitoring to exclude the current one
+            const initSites = pendingSessions.map((s) => ({
               id: s.id.toString(),
               latitude: s.latitude,
               longitude: s.longitude,
             }));
+
             const currentSettings = state.settings || await getSettings();
             const radius = currentSettings?.tolerance_radius || 200;
+
             await LocationService.startMonitoringArrival(initSites, radius);
           }
 
@@ -143,3 +152,4 @@ export async function workTrackerEffects(
     dispatch({ type: 'ERROR_OCCURRED', error: String(error) });
   }
 }
+

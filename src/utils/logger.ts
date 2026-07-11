@@ -24,17 +24,25 @@ const _output = {
 };
 
 export const AUDIT_ACTIONS = {
+  // Acciones heredadas / genéricas
   AUTO_CHECKIN: 'AUTO_CHECKIN',
   AUTO_CHECKOUT: 'AUTO_CHECKOUT',
   MANUAL: 'MANUAL',
+
+  // Semántica explícita de check-in / check-out
+  AUTO_CHECKIN_GPS: 'AUTO_CHECKIN_GPS',
+  AUTO_CHECKOUT_GPS: 'AUTO_CHECKOUT_GPS',
+  AUTO_CHECKOUT_FAILSAFE: 'AUTO_CHECKOUT_FAILSAFE',
+  MANUAL_CHECKOUT: 'MANUAL_CHECKOUT',
+  MANUAL_UPDATE: 'MANUAL_UPDATE',
+
+  // Categorías de sistema / auditoría
   OVERLAP: 'OVERLAP',
   MUTEX: 'MUTEX',
   LOCATION: 'LOCATION',
   PDF: 'PDF',
   PAYROLL: 'PAYROLL',
   GEOFENCE_EXIT: 'GEOFENCE_EXIT',
-  AUTO_CHECKIN_GPS: 'AUTO_CHECKIN_GPS',
-  AUTO_CHECKOUT_GPS: 'AUTO_CHECKOUT_GPS',
 } as const;
 
 export interface AuditLogEntry {

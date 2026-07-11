@@ -19,28 +19,57 @@ const bgLock = new AsyncLock();
 export const runFailsafeCheck = async () => {
   const db = await ensureDbReady();
   const now = dayjs().valueOf();
+
   try {
     const lastExitStr = await AsyncStorage.getItem(EXIT_TIMESTAMP_KEY);
+
     if (lastExitStr) {
       const exitTime = parseInt(lastExitStr, 10);
+
       if (Number.isNaN(exitTime) || exitTime > now) {
         await AsyncStorage.removeItem(EXIT_TIMESTAMP_KEY);
       } else {
         const timeDiff = now - exitTime;
+
         if (timeDiff > FAILSAFE_THRESHOLD_MS) {
-          const session = await db.getFirstAsync<WorkSession>("SELECT * FROM work_sessions WHERE status = 'active' ORDER BY actual_start_time DESC LIMIT 1");
+          const session = await db.getFirstAsync<WorkSession>(
+            "SELECT * FROM work_sessions WHERE status = 'active' ORDER BY actual_start_time DESC LIMIT 1"
+          );
+
           if (session?.id) {
-            log('AMARILLO', 'ADVERTENCIA', 'WARN', `Failsafe: Auto Check-out retroactivo para sesión #${session.id} (Salida detectada hace ${Math.round(timeDiff/60000)} min)`);
-            await updateSessionEndTime(session.id, exitTime);
-            await insertAuditLog(session.id, 'AUTO_CHECKOUT_GPS', `Auto Check-out (GPS) tras ${Math.round(FAILSAFE_THRESHOLD_MS/60000)} min fuera del área.`);
-            await Promise.all([AsyncStorage.removeItem(EXIT_TIMESTAMP_KEY), Notifications.scheduleNotificationAsync({ content: { title: 'Jornada Finalizada 🏁', body: `Tu sesión en ${session.client_name || 'el sitio'} se cerró automáticamente por inactividad.`, sound: true }, trigger: null })]);
+            log(
+              'AMARILLO',
+              'ADVERTENCIA',
+              'WARN',
+              `Failsafe: Auto Check-out retroactivo para sesión #${session.id} (Salida detectada hace ${Math.round(timeDiff / 60000)} min)`
+            );
+
+            await updateSessionEndTime(session.id, exitTime, 'failsafe');
+
+            await Promise.all([
+              AsyncStorage.removeItem(EXIT_TIMESTAMP_KEY),
+              Notifications.scheduleNotificationAsync({
+                content: {
+                  title: 'Jornada Finalizada 🏁',
+                  body: `Tu sesión en ${session.client_name || 'el sitio'} se cerró automáticamente por inactividad.`,
+                  sound: true,
+                },
+                trigger: null,
+              }),
+            ]);
+
             engine.dispatch({ type: 'BACKGROUND_SESSION_TIMEOUT' });
             return true;
-          } else { await AsyncStorage.removeItem(EXIT_TIMESTAMP_KEY); }
+          }
+
+          await AsyncStorage.removeItem(EXIT_TIMESTAMP_KEY);
         }
       }
     }
-  } catch (failsafeError) { log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error en Failsafe', failsafeError); }
+  } catch (failsafeError) {
+    log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error en Failsafe', failsafeError);
+  }
+
   return false;
 };
 
