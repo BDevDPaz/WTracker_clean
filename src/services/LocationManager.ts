@@ -20,8 +20,7 @@ import { WorkSession } from '../types';
 import dayjs from '../utils/dayjsSetup';
 import { LocationFSM } from './LocationFSM';
 import { locationAdapter } from '../runtime/locationAdapter';
-import { engine } from '../engine/workTrackerEngine';
-import { getDistanceFromLatLonInMeters } from '../utils/geoUtils';
+
 
 export const GEOFENCE_TASK = 'GEOFENCE_TRACKING_TASK';
 export const EXIT_TIMESTAMP_KEY = 'LAST_GEOFENCE_EXIT_TIMESTAMP';
@@ -137,7 +136,8 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }: { data: any, error
           }),
         ]);
 
-        engine.dispatch({ type: 'SYNC_ACTIVE_SESSION' });
+        // Trigger engine update
+        if (geofenceListener) geofenceListener();
 
         log(
           'VERDE',
@@ -204,6 +204,14 @@ TaskManager.defineTask(GEOFENCE_TASK, async ({ data, error }: { data: any, error
    * Calling startGeofencingAsync with the same task identifier will automatically replace
    * the existing geofence regions. This ensures we don't have stale regions monitored.
    */
+
+type GeofenceListener = () => void;
+let geofenceListener: GeofenceListener | null = null;
+
+export const setGeofenceListener = (listener: GeofenceListener | null) => {
+  geofenceListener = listener;
+};
+
 export const LocationService = {
   requestPermissions: async () => {
     return await locationAdapter.requestPermissions();
@@ -255,7 +263,7 @@ export const LocationService = {
         locationAdapter.stopGeofencing(GEOFENCE_TASK)
       ]);
 
-      log('ROJO', 'MONITOREO_DETENIDO', 'ERROR', 'Monitoreo y rastreo detenidos. Storage limpio.');
+      log('NARANJA', 'MONITOREO_DETENIDO', 'WARN', 'Monitoreo y rastreo detenidos. Storage limpio.');
     } catch (e) {
       log('ROJO', 'ERROR_CRITICO', 'ERROR', 'Error general deteniendo monitoreo', e);
     }

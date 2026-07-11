@@ -5,12 +5,14 @@ import * as Notifications from 'expo-notifications';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import '../src/services/LocationManager';
-import { BackgroundTasks, runFailsafeCheck } from '../src/services/BackgroundTasks';
-import { ensureWeeklyReportExists, checkAndDeliverPendingReports } from '../src/services/ReportGenerator';
-import { setupNotifications, scheduleDailyMorningNotification } from '../src/services/Notifications';
+
+// Servicios
+import { BackgroundTasks } from '../src/services/BackgroundTasks';
 import { log, setLoggerDB } from '../src/utils/logger';
+import { engine } from '../src/engine/workTrackerEngine';
+import { setGeofenceListener } from '../src/services/LocationManager';
+
+// Contextos
 import { LanguageProvider } from '../src/context/LanguageContext';
 import { LuxuryUIProvider } from '../src/context/LuxuryUIContext';
 import { useLogFeedback } from '../src/feedback/useLogFeedback';
@@ -42,7 +44,14 @@ export default function RootLayout() {
         log('AZUL', 'ESTADO_SISTEMA', 'INFO', 'Iniciando Base de Datos...');
         const database = await initDatabase();
         setLoggerDB(database);
-        log('AZUL', 'ESTADO_SISTEMA', 'INFO', 'Registrando Servicios de Fondo (Auto-Checkout)...');
+        setGeofenceListener(() => engine.dispatch({ type: 'SYNC_ACTIVE_SESSION' }));
+
+        log(
+          'AZUL',
+          'ESTADO_SISTEMA',
+          'INFO',
+          'Registrando Servicios de Fondo (Auto-Checkout)...'
+        );
         await BackgroundTasks.register();
         await setupNotifications();
         await scheduleDailyMorningNotification();
