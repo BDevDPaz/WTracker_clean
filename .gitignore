@@ -46,7 +46,6 @@ app-example
 .env
 .vscode/
 .jules/
-coverage/
 *.log
 
 # artefactos de auditoría y temporales
@@ -55,3 +54,14 @@ scripts/audit/reports/
 *.db-journal
 *.db-shm
 *.db-wal
+
+# Local recovery / temporary backups
+*.bak
+*.conflict-backup
+*.before-*-backup
+typecheck-after-*.log
+runtime-*.log
+gm-after-*.log
+
+# Test generated output
+coverage/
