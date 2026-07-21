@@ -1,6 +1,7 @@
 process.env.TZ = 'America/Los_Angeles';
 /** @type {import('jest').Config} */
 module.exports = {
+  setupFiles: ['<rootDir>/jest.setup.js'],
   preset: 'jest-expo',
   testEnvironment: 'node',
 

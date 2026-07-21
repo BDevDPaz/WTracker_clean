@@ -1,8 +1,5 @@
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
-<<<<<<< HEAD
 .env
-=======
->>>>>>> 415a8f1 (Baseline limpio extraído desde v2.2.0)
 
 # dependencies
 node_modules/
@@ -35,10 +32,7 @@ yarn-error.*
 *.pem
 
 # local env files
-<<<<<<< HEAD
 .docs
-=======
->>>>>>> 415a8f1 (Baseline limpio extraído desde v2.2.0)
 .env*.local
 
 # typescript
@@ -46,7 +40,6 @@ yarn-error.*
 
 app-example
 
-<<<<<<< HEAD
 # generated native folders & testing and logs
 /ios
 /android
@@ -62,8 +55,3 @@ scripts/audit/reports/
 *.db-journal
 *.db-shm
 *.db-wal
-=======
-# generated native folders
-/ios
-/android
->>>>>>> 415a8f1 (Baseline limpio extraído desde v2.2.0)

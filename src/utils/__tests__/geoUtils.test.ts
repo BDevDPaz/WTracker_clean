@@ -32,10 +32,10 @@ describe('geoUtils - Cálculo de Distancia', () => {
     expect(dist).toBeLessThan(4000000);
   });
 
-  it('debería devolver 0 si alguna coordenada es falsy (cobertura de rama)', () => {
-    // Esto fuerza la ejecución de la línea 13: if (!lat1 || !lon1 || !lat2 || !lon2)
+  it('debería calcular distancia cuando latitud es 0 porque 0 es coordenada válida', () => {
+    // La latitud 0 es válida; no debe tratarse como coordenada ausente.
     const dist = getDistanceFromLatLonInMeters(0, -118.2437, 34.0522, -118.2437);
-    expect(dist).toBe(0);
+    expect(dist).toBeGreaterThan(0);
   });
 });
 
